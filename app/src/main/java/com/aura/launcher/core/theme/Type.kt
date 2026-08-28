@@ -6,7 +6,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-val Typography = Typography(
+var AuraTypography = Typography(
     headlineLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Bold,
@@ -51,3 +51,15 @@ val Typography = Typography(
         lineHeight = 14.sp
     )
 )
+
+fun applyTypography(fontFamily: FontFamily = FontFamily.Default) {
+    AuraTypography = Typography.copy(
+        headlineLarge = Typography.headlineLarge.copy(fontFamily = fontFamily),
+        headlineMedium = Typography.headlineMedium.copy(fontFamily = fontFamily),
+        titleLarge = Typography.titleLarge.copy(fontFamily = fontFamily),
+        titleMedium = Typography.titleMedium.copy(fontFamily = fontFamily),
+        bodyLarge = Typography.bodyLarge.copy(fontFamily = fontFamily),
+        bodyMedium = Typography.bodyMedium.copy(fontFamily = fontFamily),
+        labelSmall = Typography.labelSmall.copy(fontFamily = fontFamily)
+    )
+}
