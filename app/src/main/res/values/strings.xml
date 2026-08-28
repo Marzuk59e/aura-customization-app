@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">Aura Launcher</string>
+    <string name="search_apps">Search apps &amp; shortcuts…</string>
+    <string name="customize">Customize</string>
+    <string name="wallpapers">Wallpapers</string>
+    <string name="saved_setups">Saved Setups</string>
+    <string name="favorites">Favorites</string>
+    <string name="launcher_settings">Launcher Settings</string>
+    <string name="set_as_default">Set as Default Launcher</string>
+    <string name="login">Sign In</string>
+    <string name="signup">Create Account</string>
+    <string name="guest_mode">Continue as Guest</string>
+</resources>

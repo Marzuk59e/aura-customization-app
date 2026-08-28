@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Center glowing diamond / Aura sparkle logo -->
+    <path
+        android:fillColor="#00F2FE"
+        android:pathData="M54,30 L66,54 L54,78 L42,54 Z" />
+    <path
+        android:fillColor="#7000FF"
+        android:pathData="M54,38 L60,54 L54,70 L48,54 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,46 L57,54 L54,62 L51,54 Z" />
+</vector>
