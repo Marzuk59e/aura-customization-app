@@ -11,6 +11,13 @@ import kotlinx.coroutines.flow.map
 val Context.launcherDataStore: DataStore<Preferences> by preferencesDataStore(name = "launcher_settings")
 val Context.authDataStore: DataStore<Preferences> by preferencesDataStore(name = "auth_session")
 
+data class SelectedCustomizationTheme(
+    val themeId: String = "",
+    val primaryColor: String = "#7000FF",
+    val secondaryColor: String = "#00F2FE",
+    val fontName: String = "Default"
+)
+
 class LauncherPreferences(private val context: Context) {
     companion object {
         val GRID_ROWS = intPreferencesKey("grid_rows")
@@ -37,6 +44,15 @@ class LauncherPreferences(private val context: Context) {
             iconScale = prefs[ICON_SCALE] ?: 1.0f,
             showLabels = prefs[SHOW_LABELS] ?: true,
             darkTheme = prefs[DARK_THEME] ?: true
+        )
+    }
+
+    val customizationFlow: Flow<SelectedCustomizationTheme> = context.launcherDataStore.data.map { prefs ->
+        SelectedCustomizationTheme(
+            themeId = prefs[SELECTED_THEME_ID] ?: "",
+            primaryColor = prefs[SELECTED_THEME_PRIMARY] ?: "#7000FF",
+            secondaryColor = prefs[SELECTED_THEME_SECONDARY] ?: "#00F2FE",
+            fontName = prefs[SELECTED_FONT] ?: "Default"
         )
     }
 

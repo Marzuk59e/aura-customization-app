@@ -182,9 +182,14 @@ fun EditableCustomizationScreen(
                             IconStylePack.values().any { remotePack.name.contains(it.title, ignoreCase = true) } -> IconStylePack.values().first { remotePack.name.contains(it.title, ignoreCase = true) }
                             else -> IconStylePack.DEFAULT
                         }
+                        val usedFallback = remotePack != null && mappedPack.title != remotePack.name && mappedPack == IconStylePack.DEFAULT
                         homeViewModel.setIconPack(mappedPack)
                         settingsViewModel.saveSelectedIconPack(remotePack?.name ?: mappedPack.title)
-                        Toast.makeText(context, "Icon pack applied: ${mappedPack.title}", Toast.LENGTH_SHORT).show()
+                        if (usedFallback) {
+                            Toast.makeText(context, "This icon pack isn't fully supported yet, applying closest match.", Toast.LENGTH_LONG).show()
+                        } else {
+                            Toast.makeText(context, "Icon pack applied: ${mappedPack.title}", Toast.LENGTH_SHORT).show()
+                        }
                     }
 
                     // Apply Theme
@@ -202,15 +207,15 @@ fun EditableCustomizationScreen(
                         }
                     }
 
-                    // Apply Font (persist selection)
+                    // Apply Font (persist selection; theme observes DataStore instantly)
                     val selectedFont = selections["Fonts"]
                     if (!selectedFont.isNullOrBlank() && selectedFont != "None") {
                         settingsViewModel.saveSelectedFont(selectedFont)
-                        Toast.makeText(context, "Font selection saved: $selectedFont (may require app restart)", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Font selection saved: $selectedFont", Toast.LENGTH_SHORT).show()
                     }
 
                     // Final message
-                    Toast.makeText(context, "Customization applied where supported. Some changes may require restart or permissions.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "Customization applied where supported. Some system-level changes may still require permissions.", Toast.LENGTH_LONG).show()
 
                     onBack()
                 }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = AuraSuccess)) {
