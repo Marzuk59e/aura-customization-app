@@ -77,16 +77,9 @@ fun AuraLauncherTheme(
         }
     }
 
-    val dynamicTypography = remember(customization.fontName) {
-        Typography.copy(
-            headlineLarge = Typography.headlineLarge.copy(fontFamily = selectedFontFamily),
-            headlineMedium = Typography.headlineMedium.copy(fontFamily = selectedFontFamily),
-            titleLarge = Typography.titleLarge.copy(fontFamily = selectedFontFamily),
-            titleMedium = Typography.titleMedium.copy(fontFamily = selectedFontFamily),
-            bodyLarge = Typography.bodyLarge.copy(fontFamily = selectedFontFamily),
-            bodyMedium = Typography.bodyMedium.copy(fontFamily = selectedFontFamily),
-            labelSmall = Typography.labelSmall.copy(fontFamily = selectedFontFamily)
-        )
+    SideEffect {
+        applyThemePalette(primary = primaryColor, secondary = secondaryColor, darkMode = darkTheme)
+        applyTypography(selectedFontFamily)
     }
 
     val colorScheme = if (darkTheme) {
@@ -129,7 +122,7 @@ fun AuraLauncherTheme(
 
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = dynamicTypography,
+        typography = AuraTypography,
         content = content
     )
 }

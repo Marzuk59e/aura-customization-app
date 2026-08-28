@@ -6,7 +6,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-var AuraTypography = Typography(
+private val DefaultAuraTypography = Typography(
     headlineLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Bold,
@@ -52,14 +52,16 @@ var AuraTypography = Typography(
     )
 )
 
+var AuraTypography: Typography = DefaultAuraTypography
+
 fun applyTypography(fontFamily: FontFamily = FontFamily.Default) {
-    AuraTypography = Typography.copy(
-        headlineLarge = Typography.headlineLarge.copy(fontFamily = fontFamily),
-        headlineMedium = Typography.headlineMedium.copy(fontFamily = fontFamily),
-        titleLarge = Typography.titleLarge.copy(fontFamily = fontFamily),
-        titleMedium = Typography.titleMedium.copy(fontFamily = fontFamily),
-        bodyLarge = Typography.bodyLarge.copy(fontFamily = fontFamily),
-        bodyMedium = Typography.bodyMedium.copy(fontFamily = fontFamily),
-        labelSmall = Typography.labelSmall.copy(fontFamily = fontFamily)
+    AuraTypography = DefaultAuraTypography.copy(
+        headlineLarge = DefaultAuraTypography.headlineLarge.copy(fontFamily = fontFamily),
+        headlineMedium = DefaultAuraTypography.headlineMedium.copy(fontFamily = fontFamily),
+        titleLarge = DefaultAuraTypography.titleLarge.copy(fontFamily = fontFamily),
+        titleMedium = DefaultAuraTypography.titleMedium.copy(fontFamily = fontFamily),
+        bodyLarge = DefaultAuraTypography.bodyLarge.copy(fontFamily = fontFamily),
+        bodyMedium = DefaultAuraTypography.bodyMedium.copy(fontFamily = fontFamily),
+        labelSmall = DefaultAuraTypography.labelSmall.copy(fontFamily = fontFamily)
     )
 }
