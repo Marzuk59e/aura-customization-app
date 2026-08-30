@@ -80,6 +80,13 @@ class ExploreViewModel(
         }
     }
 
+    fun applyWallpaperUrl(imageUrl: String, onApplied: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val success = wallpaperRepository.applyWallpaper(imageUrl)
+            onApplied(success)
+        }
+    }
+
     fun favoriteItem(userId: String, type: FavoriteType, id: String, title: String, previewUrl: String) {
         viewModelScope.launch {
             savedSetupRepository.toggleFavorite(userId, type, id, title, previewUrl)

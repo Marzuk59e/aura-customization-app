@@ -25,6 +25,23 @@ class HomeViewModel(
     val page0Items: StateFlow<List<HomeItem>> = manageHomeItemsUseCase.getPageItems(0)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // All items across every page — used to drive the swipeable multi-page home surface
+    val allHomeItems: StateFlow<List<HomeItem>> = manageHomeItemsUseCase.getAllItems()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // Matches css .launcher-page-dots: always one blank page available past the last used page
+    val pageCount: StateFlow<Int> = allHomeItems.map { items ->
+        val maxUsedPage = items.filter { it.pageIndex >= 0 }.maxOfOrNull { it.pageIndex } ?: 0
+        (maxUsedPage + 2).coerceAtLeast(1)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 1)
+
+    private val _activePageIndex = MutableStateFlow(0)
+    val activePageIndex: StateFlow<Int> = _activePageIndex.asStateFlow()
+
+    fun setActivePage(index: Int) {
+        _activePageIndex.value = index
+    }
+
     val dockItems: StateFlow<List<HomeItem>> = manageHomeItemsUseCase.getDockItems()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -46,10 +63,10 @@ class HomeViewModel(
         }
     }
 
-    fun addWidgetToHome(widget: AuraWidgetInfo) {
+    fun addWidgetToHome(widget: AuraWidgetInfo, pageIndex: Int = 0) {
         viewModelScope.launch {
             val item = HomeItem(
-                pageIndex = 0,
+                pageIndex = pageIndex,
                 cellX = 0,
                 cellY = 0,
                 spanX = widget.spanX,

@@ -27,6 +27,7 @@ class LauncherPreferences(private val context: Context) {
         val SHOW_LABELS = booleanPreferencesKey("show_labels")
         val DARK_THEME = booleanPreferencesKey("dark_theme")
         val IS_INITIALIZED = booleanPreferencesKey("is_initialized")
+        val HAS_SEEN_WELCOME = booleanPreferencesKey("has_seen_welcome")
 
         // New customization persistence keys
         val SELECTED_ICON_PACK = stringPreferencesKey("selected_icon_pack")
@@ -58,6 +59,10 @@ class LauncherPreferences(private val context: Context) {
 
     val isInitializedFlow: Flow<Boolean> = context.launcherDataStore.data.map { prefs ->
         prefs[IS_INITIALIZED] ?: false
+    }
+
+    val hasSeenWelcomeFlow: Flow<Boolean> = context.launcherDataStore.data.map { prefs ->
+        prefs[HAS_SEEN_WELCOME] ?: false
     }
 
     suspend fun updateGrid(rows: Int, cols: Int) {
@@ -111,6 +116,12 @@ class LauncherPreferences(private val context: Context) {
     suspend fun setInitialized(initialized: Boolean) {
         context.launcherDataStore.edit { prefs ->
             prefs[IS_INITIALIZED] = initialized
+        }
+    }
+
+    suspend fun setHasSeenWelcome(seen: Boolean) {
+        context.launcherDataStore.edit { prefs ->
+            prefs[HAS_SEEN_WELCOME] = seen
         }
     }
 }

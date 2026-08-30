@@ -1,6 +1,7 @@
 package com.aura.launcher
 
 import android.app.Application
+import com.aura.launcher.core.audio.SoundEngine
 import com.aura.launcher.core.database.AppDatabase
 import com.aura.launcher.core.datastore.AuthPreferences
 import com.aura.launcher.core.datastore.LauncherPreferences
@@ -38,6 +39,9 @@ class AuraLauncherApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+
+        // Sound & haptic feedback (mirrors js/core/audio-engine.js on web)
+        SoundEngine.init(this)
 
         // Core singletons
         database = AppDatabase.getDatabase(this)

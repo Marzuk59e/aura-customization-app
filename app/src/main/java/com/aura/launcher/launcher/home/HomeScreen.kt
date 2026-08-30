@@ -1,19 +1,28 @@
 package com.aura.launcher.launcher.home
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -25,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,37 +52,67 @@ import com.aura.launcher.domain.model.HomeItemType
 import java.text.SimpleDateFormat
 import java.util.*
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     homeViewModel: HomeViewModel,
     onOpenAppDrawer: () -> Unit,
     onOpenExplore: () -> Unit,
+    onOpenWallpaper: () -> Unit,
     onOpenSavedSetups: () -> Unit,
     onOpenProfile: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
     val homeItems by homeViewModel.page0Items.collectAsState()
+    val allHomeItems by homeViewModel.allHomeItems.collectAsState()
+    val pageCount by homeViewModel.pageCount.collectAsState()
     val dockItems by homeViewModel.dockItems.collectAsState()
     val iconShape by homeViewModel.activeIconShape.collectAsState()
     val iconPack by homeViewModel.activeIconPack.collectAsState()
     val vibePalette by homeViewModel.vibePalette.collectAsState()
+    val context = LocalContext.current
+    val pagerState = rememberPagerState(pageCount = { pageCount })
+
+    LaunchedEffect(pagerState.currentPage) {
+        homeViewModel.setActivePage(pagerState.currentPage)
+    }
 
     var showWidgetPicker by remember { mutableStateOf(false) }
     var showIconPicker by remember { mutableStateOf(false) }
     var showVibeSyncDialog by remember { mutableStateOf(false) }
+    var isEditMode by remember { mutableStateOf(false) }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(Unit) {
-                detectVerticalDragGestures { _, dragAmount ->
-                    if (dragAmount < -30) {
-                        onOpenAppDrawer()
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Ambient gradient overlay — matches css .launcher-ambient-overlay
+        // linear-gradient(180deg, rgba(0,0,0,0.3) 0%, transparent 20%, transparent 70%, rgba(0,0,0,0.65) 100%)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                        0f to Color.Black.copy(alpha = 0.3f),
+                        0.2f to Color.Transparent,
+                        0.7f to Color.Transparent,
+                        1f to Color.Black.copy(alpha = 0.65f)
+                    )
+                )
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures { _, dragAmount ->
+                        if (dragAmount < -30) {
+                            onOpenAppDrawer()
+                        }
                     }
                 }
-            }
-            .padding(horizontal = 20.dp)
-    ) {
+                .pointerInput(Unit) {
+                    detectTapGestures(onLongPress = { isEditMode = true })
+                }
+                .padding(horizontal = 20.dp)
+        ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -148,35 +188,67 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Main Dynamic Home Grid (Widgets & Apps)
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(4),
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // Default Top Clock Widget
-                item(span = { GridItemSpan(4) }) {
-                    DigitalClockNeonWidget(accentColor = vibePalette.vibrant)
+            // Main Dynamic Home Grid — multi-page swipeable surface, matches css .launcher-pages-container
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.weight(1f)
+            ) { page ->
+                val pageItems = remember(allHomeItems, page) {
+                    allHomeItems.filter { it.pageIndex == page }
                 }
-
-                // Render dynamic Home items
-                items(homeItems, key = { it.id }, span = { item ->
-                    if (item.itemType == HomeItemType.WIDGET) GridItemSpan(item.spanX) else GridItemSpan(1)
-                }) { item ->
-                    if (item.itemType == HomeItemType.WIDGET) {
-                        when (item.widgetProvider) {
-                            WidgetType.ANALOG_CLOCK.name -> AnalogClockWidget(accentColor = vibePalette.vibrant)
-                            WidgetType.BATTERY_GAUGE.name -> BatteryGaugeWidget()
-                            WidgetType.WEATHER_CARD.name -> WeatherCardWidget()
-                            else -> DigitalClockNeonWidget(accentColor = vibePalette.vibrant)
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(4),
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Default Top Clock Widget — only on the first page
+                    if (page == 0) {
+                        item(span = { GridItemSpan(4) }) {
+                            DigitalClockNeonWidget(accentColor = vibePalette.vibrant)
                         }
-                    } else {
-                        HomeGridItem(
-                            item = item,
-                            iconShape = iconShape,
-                            accentColor = vibePalette.lightVibrant,
-                            onClick = { homeViewModel.launchHomeItem(item) }
+                    }
+
+                    // Render dynamic Home items for this page
+                    items(pageItems, key = { it.id }, span = { item ->
+                        if (item.itemType == HomeItemType.WIDGET) GridItemSpan(item.spanX) else GridItemSpan(1)
+                    }) { item ->
+                        if (item.itemType == HomeItemType.WIDGET) {
+                            when (item.widgetProvider) {
+                                WidgetType.ANALOG_CLOCK.name -> AnalogClockWidget(accentColor = vibePalette.vibrant)
+                                WidgetType.BATTERY_GAUGE.name -> BatteryGaugeWidget()
+                                WidgetType.WEATHER_CARD.name -> WeatherCardWidget()
+                                else -> DigitalClockNeonWidget(accentColor = vibePalette.vibrant)
+                            }
+                        } else {
+                            HomeGridItem(
+                                item = item,
+                                iconShape = iconShape,
+                                accentColor = vibePalette.lightVibrant,
+                                onClick = { homeViewModel.launchHomeItem(item) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Page Dots Indicator — matches css .launcher-page-dots / .page-dot
+            if (pageCount > 1) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    repeat(pageCount) { index ->
+                        val isActive = index == pagerState.currentPage
+                        Box(
+                            modifier = Modifier
+                                .padding(horizontal = 3.dp)
+                                .height(6.dp)
+                                .width(if (isActive) 16.dp else 6.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(if (isActive) AuraCyan else Color.White.copy(alpha = 0.3f))
                         )
                     }
                 }
@@ -217,11 +289,33 @@ fun HomeScreen(
             )
         }
 
+        // Edit Mode Toolbar — matches css .launcher-edit-toolbar (long-press home surface to trigger)
+        AnimatedVisibility(
+            visible = isEditMode,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 92.dp),
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+        ) {
+            EditModeToolbar(
+                onAddWidget = { showWidgetPicker = true },
+                onAddFolder = {
+                    Toast.makeText(context, "Folder creation is coming soon", Toast.LENGTH_SHORT).show()
+                },
+                onOpenWallpaper = {
+                    isEditMode = false
+                    onOpenWallpaper()
+                },
+                onDone = { isEditMode = false }
+            )
+        }
+
         // Modals & Bottom Sheets
         if (showWidgetPicker) {
             WidgetPickerSheet(
                 onDismiss = { showWidgetPicker = false },
-                onSelectWidget = { homeViewModel.addWidgetToHome(it) }
+                onSelectWidget = { homeViewModel.addWidgetToHome(it, pagerState.currentPage) }
             )
         }
 
@@ -242,5 +336,60 @@ fun HomeScreen(
                 onApplyPalette = { homeViewModel.applyVibePalette(it) }
             )
         }
+    }
+    }
+}
+
+// Matches css .launcher-edit-toolbar / .edit-toolbar-title / .edit-actions-row / .edit-btn
+@Composable
+private fun EditModeToolbar(
+    onAddWidget: () -> Unit,
+    onAddFolder: () -> Unit,
+    onOpenWallpaper: () -> Unit,
+    onDone: () -> Unit
+) {
+    Surface(
+        color = DarkSurfaceGlass,
+        shape = RoundedCornerShape(24.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder.copy(alpha = 0.4f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Default.Edit, contentDescription = null, tint = AuraCyan, modifier = Modifier.size(14.dp))
+                Text("Home Screen Edit Mode", color = AuraCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                EditToolbarButton(Icons.Default.AddCircle, "Widget", modifier = Modifier.weight(1f), onClick = onAddWidget)
+                EditToolbarButton(Icons.Default.CreateNewFolder, "Folder", modifier = Modifier.weight(1f), onClick = onAddFolder)
+                EditToolbarButton(Icons.Default.Image, "Wallpaper", modifier = Modifier.weight(1f), onClick = onOpenWallpaper)
+                EditToolbarButton(Icons.Default.Check, "Done", modifier = Modifier.weight(1f), isDone = true, onClick = onDone)
+            }
+        }
+    }
+}
+
+@Composable
+private fun EditToolbarButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    modifier: Modifier = Modifier,
+    isDone: Boolean = false,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (isDone) AuraSuccess else DarkSurfaceVariant)
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp, horizontal = 4.dp)
+    ) {
+        Icon(icon, contentDescription = label, tint = Color.White, modifier = Modifier.size(15.dp))
+        Text(label, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
     }
 }

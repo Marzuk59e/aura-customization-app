@@ -43,7 +43,11 @@ fun LazyColumnContent(
     wallpapers: List<RemoteWallpaper>,
     iconPacks: List<RemoteIconPack>,
     themes: List<RemoteTheme>,
-    onApplyWallpaper: (RemoteWallpaper) -> Unit
+    onApplyWallpaper: (RemoteWallpaper) -> Unit,
+    onImportWallpaper: (RemoteWallpaper) -> Unit,
+    onNavigateToVibeSync: () -> Unit,
+    onApplyIconPack: (RemoteIconPack) -> Unit,
+    onApplyTheme: (RemoteTheme) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -55,17 +59,17 @@ fun LazyColumnContent(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(24.dp))
                     .background(
-                        Brush.linearGradient(listOf(AuraPink.copy(alpha = 0.15f), AuraCyan.copy(alpha = 0.08f)))
+                        Brush.linearGradient(listOf(Color(0xFFFF0055).copy(alpha = 0.15f), Color(0xFF00E5FF).copy(alpha = 0.08f)))
                     )
                     .background(DarkSurface.copy(alpha = 0.4f))
-                    .border(1.dp, AuraPink.copy(alpha = 0.35f), RoundedCornerShape(24.dp))
+                    v
                     .padding(16.dp)
             ) {
                 Column {
                     Surface(
-                        color = AuraCyan.copy(alpha = 0.12f),
+                        color = Color(0xFF00E5FF).copy(alpha = 0.12f),
                         shape = RoundedCornerShape(50),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, AuraCyan.copy(alpha = 0.3f))
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.3f))
                     ) {
                         Text(
                             "★ FLAGSHIP #2",
@@ -84,13 +88,13 @@ fun LazyColumnContent(
                     )
                     Spacer(Modifier.height(10.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                        listOf(AuraPink, AuraCyan, AuraPurple, Color.White.copy(alpha = 0.3f)).forEach { c ->
+                        listOf(Color(0xFFFF0055), Color(0xFF00E5FF), Color(0xFFA855F7), Color(0xFF1E153A)).forEach { c ->
                             Box(modifier = Modifier.size(14.dp).clip(CircleShape).background(c))
                         }
                     }
                     Spacer(Modifier.height(14.dp))
-                    Button(
-                        onClick = { },
+                   Button(
+                        onClick = onNavigateToVibeSync,
                         colors = ButtonDefaults.buttonColors(containerColor = AuraPink),
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth().height(44.dp)
@@ -191,7 +195,7 @@ fun LazyColumnContent(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 wallpapers.take(4).forEachIndexed { index, wp ->
-                    TrendingCard(rank = index + 1, wallpaper = wp)
+                    TrendingCard(rank = index + 1, wallpaper = wp, onImport = { onImportWallpaper(wp) })
                 }
             }
             Spacer(Modifier.height(24.dp))
@@ -211,11 +215,11 @@ fun LazyColumnContent(
                     Spacer(Modifier.height(14.dp))
                 }
                 ExploreTab.ICON_PACKS -> items(iconPacks, key = { "ip-${it.id}" }) { ip ->
-                    IconPackCard(iconPack = ip)
+                    IconPackCard(iconPack = ip, onApply = { onApplyIconPack(ip) })
                     Spacer(Modifier.height(14.dp))
                 }
                 ExploreTab.THEMES -> items(themes, key = { "th-${it.id}" }) { th ->
-                    ThemeCard(theme = th)
+                    ThemeCard(theme = th, onApply = { onApplyTheme(th) })
                     Spacer(Modifier.height(14.dp))
                 }
             }
@@ -246,7 +250,7 @@ fun VibeSyncContent(viewModel: ExploreViewModel) {
         contentPadding = PaddingValues(horizontal = 18.dp, vertical = 16.dp)
     ) {
         item {
-            Surface(color = AuraPink.copy(alpha = 0.12f), shape = RoundedCornerShape(50), border = androidx.compose.foundation.BorderStroke(1.dp, AuraPink.copy(alpha = 0.3f))) {
+            Surface(color = Color(0xFFFF0055).copy(alpha = 0.12f), shape = RoundedCornerShape(50), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF0055).copy(alpha = 0.3f))) {
                 Text("★ FLAGSHIP IDEA #2", color = AuraPink, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
             }
             Spacer(Modifier.height(8.dp))
@@ -368,7 +372,7 @@ private val timePresets = listOf(
 fun SurpriseContent() {
     var selected by remember { mutableStateOf(timePresets.last()) }
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 16.dp)) {
-        Surface(color = AuraPink.copy(alpha = 0.12f), shape = RoundedCornerShape(50), border = androidx.compose.foundation.BorderStroke(1.dp, AuraPink.copy(alpha = 0.3f))) {
+        Surface(color = Color(0xFFFF0055).copy(alpha = 0.12f), shape = RoundedCornerShape(50), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF0055).copy(alpha = 0.3f))) {
             Text("★ FLAGSHIP IDEA #6", color = AuraPink, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
         }
         Spacer(Modifier.height(8.dp))
@@ -408,7 +412,7 @@ fun SurpriseContent() {
         Spacer(Modifier.height(18.dp))
 
         OutlinedButton(
-            onClick = { },
+            onClick = { selected = timePresets.random() },
             shape = RoundedCornerShape(16.dp),
             border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
@@ -437,7 +441,7 @@ fun AIStylistContent() {
     var input by remember { mutableStateOf("") }
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 16.dp)) {
-        Surface(color = AuraPink.copy(alpha = 0.12f), shape = RoundedCornerShape(50), border = androidx.compose.foundation.BorderStroke(1.dp, AuraPink.copy(alpha = 0.3f))) {
+        Surface(color = Color(0xFFFF0055).copy(alpha = 0.12f), shape = RoundedCornerShape(50), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF0055).copy(alpha = 0.3f))) {
             Text("🤖 HYBRID AI ENGINE", color = AuraPink, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
         }
         Spacer(Modifier.height(8.dp))

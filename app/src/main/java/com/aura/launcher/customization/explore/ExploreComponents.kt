@@ -110,7 +110,7 @@ fun QuickActionRow() {
 }
 
 @Composable
-fun TrendingCard(rank: Int, wallpaper: RemoteWallpaper) {
+fun TrendingCard(rank: Int, wallpaper: RemoteWallpaper, onImport: () -> Unit) {
     Column(
         modifier = Modifier
             .width(170.dp)
@@ -142,7 +142,7 @@ fun TrendingCard(rank: Int, wallpaper: RemoteWallpaper) {
                 color = Color.White.copy(alpha = 0.08f),
                 shape = RoundedCornerShape(6.dp),
                 border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-                modifier = Modifier.fillMaxWidth().clickable { }
+               modifier = Modifier.fillMaxWidth().clickable { onImport() }
             ) {
                 Text("Import Setup", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(4.dp))
             }
@@ -218,7 +218,8 @@ fun WallpaperCard(
 
 @Composable
 fun IconPackCard(
-    iconPack: RemoteIconPack
+    iconPack: RemoteIconPack,
+    onApply: () -> Unit
 ) {
     Surface(
         color = DarkSurface,
@@ -253,7 +254,7 @@ fun IconPackCard(
             Spacer(modifier = Modifier.width(8.dp))
 
             Button(
-                onClick = { /* Apply icon pack */ },
+                onClick = onApply,
                 colors = ButtonDefaults.buttonColors(containerColor = AuraPurple),
                 shape = RoundedCornerShape(12.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
@@ -266,7 +267,8 @@ fun IconPackCard(
 
 @Composable
 fun ThemeCard(
-    theme: RemoteTheme
+    theme: RemoteTheme,
+    onApply: () -> Unit
 ) {
     Surface(
         color = DarkSurface,
@@ -294,7 +296,7 @@ fun ThemeCard(
             Spacer(modifier = Modifier.height(14.dp))
 
             Button(
-                onClick = { /* Apply theme */ },
+                onClick = onApply,
                 colors = ButtonDefaults.buttonColors(containerColor = AuraPurple),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth().height(40.dp)

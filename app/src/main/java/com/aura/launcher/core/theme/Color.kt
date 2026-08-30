@@ -1,30 +1,37 @@
 package com.aura.launcher.core.theme
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 
-// Matches css/base/variables.css from the aura-customization-app web design
-var AuraPurple = Color(0xFFA855F7)      // --accent-tertiary
-var AuraPurpleLight = Color(0xFFC084FC)
-var AuraCyan = Color(0xFF00E5FF)        // --accent-secondary
-var AuraPink = Color(0xFFFF0055)        // --accent-primary
-var AuraAmber = Color(0xFFF59E0B)       // --color-warning
-var AuraSuccess = Color(0xFF10B981)     // --color-success
+// Matches css/base/variables.css from the aura-customization-app web design.
+// These are backed by Compose State (`by mutableStateOf`) instead of plain `var`s
+// so that any Composable reading them automatically recomposes when a preset,
+// mood, or theme changes them — matching the reactive behaviour of the CSS
+// custom-property version on the web build.
+var AuraPurple by mutableStateOf(Color(0xFFA855F7))      // --accent-tertiary
+var AuraPurpleLight by mutableStateOf(Color(0xFFC084FC))
+var AuraCyan by mutableStateOf(Color(0xFF00E5FF))        // --accent-secondary
+var AuraPink by mutableStateOf(Color(0xFFFF0055))        // --accent-primary
+var AuraAmber by mutableStateOf(Color(0xFFF59E0B))       // --color-warning
+var AuraSuccess by mutableStateOf(Color(0xFF10B981))     // --color-success
 
-var DarkBg = Color(0xFF05070C)          // --bg-app
-var DarkSurface = Color(0xFF10131C)     // --bg-card
-var DarkSurfaceGlass = Color(0xE010131C) // --bg-glass
-var DarkSurfaceVariant = Color(0xFF181D2A) // --bg-card-elevated
-var DarkBorder = Color(0x14FFFFFF)      // --border-subtle
+var DarkBg by mutableStateOf(Color(0xFF05070C))          // --bg-app
+var DarkSurface by mutableStateOf(Color(0xFF10131C))     // --bg-card
+var DarkSurfaceGlass by mutableStateOf(Color(0xE010131C)) // --bg-glass
+var DarkSurfaceVariant by mutableStateOf(Color(0xFF181D2A)) // --bg-card-elevated
+var DarkBorder by mutableStateOf(Color(0x14FFFFFF))      // --border-subtle
 
-var TextPrimary = Color(0xFFF8FAFC)     // --text-main
-var TextSecondary = Color(0xFF94A3B8)   // --text-sub
-var TextMuted = Color(0xFF64748B)       // --text-muted
+var TextPrimary by mutableStateOf(Color(0xFFF8FAFC))     // --text-main
+var TextSecondary by mutableStateOf(Color(0xFF94A3B8))   // --text-sub
+var TextMuted by mutableStateOf(Color(0xFF64748B))       // --text-muted
 
-var LightBg = Color(0xFFF7F8FC)
-var LightSurface = Color(0xFFFFFFFF)
-var LightSurfaceGlass = Color(0xCCFFFFFF)
-var LightSurfaceVariant = Color(0xFFEAEBF2)
-var LightBorder = Color(0x1A000000)
+var LightBg by mutableStateOf(Color(0xFFF7F8FC))
+var LightSurface by mutableStateOf(Color(0xFFFFFFFF))
+var LightSurfaceGlass by mutableStateOf(Color(0xCCFFFFFF))
+var LightSurfaceVariant by mutableStateOf(Color(0xFFEAEBF2))
+var LightBorder by mutableStateOf(Color(0x1A000000))
 
 fun resetDefaultPalette() {
     AuraPurple = Color(0xFFA855F7)
@@ -56,10 +63,11 @@ fun applyThemePalette(
     secondary: Color = AuraCyan,
     darkMode: Boolean = true
 ) {
-    AuraPurple = primary
-    AuraPurpleLight = primary.copy(alpha = 0.75f)
+    // Matches web: only --accent-primary & --accent-secondary change per
+    // preset. --accent-tertiary (purple) stays constant, so AuraPurple is
+    // intentionally NOT reassigned here anymore.
+    AuraPink = primary
     AuraCyan = secondary
-    AuraPink = primary.copy(alpha = 0.9f)
 
     if (darkMode) {
         DarkBg = Color(0xFF05070C)

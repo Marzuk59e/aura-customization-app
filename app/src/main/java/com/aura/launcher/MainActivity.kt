@@ -10,6 +10,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.core.view.WindowCompat
@@ -32,6 +34,7 @@ enum class LauncherScreen {
     SAVED_SETUPS,
     FAVORITES,
     PROFILE,
+    WELCOME,
     LOGIN,
     SIGNUP
 }
@@ -54,9 +57,17 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             AuraLauncherTheme {
+                val coroutineScope = rememberCoroutineScope()
                 var currentScreen by remember { mutableStateOf(LauncherScreen.HOME) }
 
                 val currentUser by authViewModel.currentUser.collectAsState()
+                val hasSeenWelcome by app.launcherPreferences.hasSeenWelcomeFlow.collectAsState(initial = false)
+
+                LaunchedEffect(currentUser, hasSeenWelcome) {
+                    currentScreen = if (currentUser != null) LauncherScreen.EXPLORE
+                    else if (hasSeenWelcome) LauncherScreen.LOGIN
+                    else LauncherScreen.WELCOME
+                }
 
                 // Intercept back button when not in Home screen
                 BackHandler(enabled = currentScreen != LauncherScreen.HOME) {
@@ -73,7 +84,11 @@ class MainActivity : ComponentActivity() {
                             LauncherScreen.HOME -> HomeScreen(
                                 homeViewModel = homeViewModel,
                                 onOpenAppDrawer = { currentScreen = LauncherScreen.APP_DRAWER },
-                                onOpenExplore = { currentScreen = LauncherScreen.EDITABLE_CUSTOMIZATION },
+                                onOpenExplore = { currentScreen = LauncherScreen.EXPLORE },
+                                onOpenWallpaper = {
+                                    exploreViewModel.selectTab(ExploreTab.WALLPAPERS)
+                                    currentScreen = LauncherScreen.EXPLORE
+                                },
                                 onOpenSavedSetups = { currentScreen = LauncherScreen.SAVED_SETUPS },
                                 onOpenProfile = { currentScreen = LauncherScreen.PROFILE },
                                 onOpenSettings = { currentScreen = LauncherScreen.SETTINGS }
@@ -91,6 +106,8 @@ class MainActivity : ComponentActivity() {
                             )
                             LauncherScreen.EXPLORE -> ExploreScreen(
                                 viewModel = exploreViewModel,
+                                homeViewModel = homeViewModel,
+                                settingsViewModel = settingsViewModel,
                                 onBack = { currentScreen = LauncherScreen.HOME }
                             )
                             LauncherScreen.SETTINGS -> SettingsScreen(
@@ -113,16 +130,24 @@ class MainActivity : ComponentActivity() {
                                 onLogout = { authViewModel.logout() },
                                 onBack = { currentScreen = LauncherScreen.HOME }
                             )
+                            LauncherScreen.WELCOME -> WelcomeScreen(
+                                onGetStarted = {
+                                    coroutineScope.launch {
+                                        app.launcherPreferences.setHasSeenWelcome(true)
+                                        currentScreen = LauncherScreen.LOGIN
+                                    }
+                                }
+                            )
                             LauncherScreen.LOGIN -> LoginScreen(
                                 authViewModel = authViewModel,
                                 onNavigateToSignUp = { currentScreen = LauncherScreen.SIGNUP },
-                                onAuthSuccess = { currentScreen = LauncherScreen.PROFILE },
+                                onAuthSuccess = { currentScreen = LauncherScreen.EXPLORE },
                                 onBack = { currentScreen = LauncherScreen.HOME }
                             )
                             LauncherScreen.SIGNUP -> SignUpScreen(
                                 authViewModel = authViewModel,
                                 onNavigateToLogin = { currentScreen = LauncherScreen.LOGIN },
-                                onAuthSuccess = { currentScreen = LauncherScreen.PROFILE },
+                                onAuthSuccess = { currentScreen = LauncherScreen.EXPLORE },
                                 onBack = { currentScreen = LauncherScreen.HOME }
                             )
                         }
