@@ -7,12 +7,12 @@ plugins {
 
 android {
     namespace = "com.aura.launcher"
-    compileSdk = 34
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.aura.launcher"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 37
         versionCode = 2
         versionName = "1.0.0"
 

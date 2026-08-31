@@ -1,5 +1,7 @@
 package com.aura.launcher.customization.explore
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -10,12 +12,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -44,6 +48,24 @@ val exploreCategories = listOf(
 val stylePresets = listOf("Cyberpunk", "Minimal Bauhaus", "True AMOLED", "Sunset Wave")
 val moodProfiles = listOf("Focus Mode", "Weekend Chill", "Night Gaming")
 
+// Matches web's .badge-mini: fontSize 9px, fontWeight 700, cyan text on a
+// translucent cyan pill (background: rgba(0,229,255,0.1), radius: full).
+@Composable
+fun BadgeMini(text: String) {
+    Surface(
+        color = AuraCyan.copy(alpha = 0.1f),
+        shape = RoundedCornerShape(50)
+    ) {
+        Text(
+            text,
+            color = AuraCyan,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+        )
+    }
+}
+
 @Composable
 fun CategoryGrid(
     categories: List<ExploreCategory>,
@@ -54,17 +76,20 @@ fun CategoryGrid(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             row.forEach { cat ->
                 val active = cat == activeCategory
+                val bgColor by animateColorAsState(if (active) AuraPink.copy(alpha = 0.08f) else DarkSurface, tween(200), label = "categoryBg")
+                val borderColor by animateColorAsState(if (active) AuraPink else DarkBorder, tween(200), label = "categoryBorder")
+                val iconColor by animateColorAsState(if (active) AuraPink else TextSecondary, tween(200), label = "categoryIcon")
                 Column(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(16.dp))
-                        .background(if (active) AuraPink.copy(alpha = 0.08f) else DarkSurface)
-                        .border(1.dp, if (active) AuraPink else DarkBorder, RoundedCornerShape(16.dp))
+                        .background(bgColor)
+                        .border(1.dp, borderColor, RoundedCornerShape(16.dp))
                         .clickable { onClick(cat) }
                         .padding(vertical = 10.dp, horizontal = 4.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Icon(cat.icon, contentDescription = null, tint = if (active) AuraPink else TextSecondary, modifier = Modifier.size(18.dp))
+                    Icon(cat.icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.height(4.dp))
                     Text(cat.label, color = TextPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
@@ -75,13 +100,18 @@ fun CategoryGrid(
 }
 
 @Composable
-fun QuickActionRow() {
-    data class QuickAction(val title: String, val subtitle: String, val icon: androidx.compose.ui.graphics.vector.ImageVector, val color: Color)
+fun QuickActionRow(
+    onStyleQuizClick: () -> Unit,
+    onSurpriseMeClick: () -> Unit,
+    onHapticsClick: () -> Unit,
+    onAmoledAuditClick: () -> Unit
+) {
+    data class QuickAction(val title: String, val subtitle: String, val icon: androidx.compose.ui.graphics.vector.ImageVector, val color: Color, val onClick: () -> Unit)
     val actions = listOf(
-        QuickAction("Style Quiz", "Instant Setup", Icons.Default.AutoAwesome, AuraPurple),
-        QuickAction("Surprise Me", "Flagship #6", Icons.Default.Shuffle, AuraPink),
-        QuickAction("Haptics", "Flagship #10", Icons.Default.Vibration, AuraCyan),
-        QuickAction("94% AMOLED", "Audit", Icons.Default.BatteryChargingFull, AuraSuccess)
+        QuickAction("Style Quiz", "Instant Setup", Icons.Default.AutoAwesome, AuraPurple, onStyleQuizClick),
+        QuickAction("Surprise Me", "Flagship #6", Icons.Default.Shuffle, Color(0xFFFF0055), onSurpriseMeClick),
+        QuickAction("Haptics", "Flagship #10", Icons.Default.Vibration, Color(0xFF00E5FF), onHapticsClick),
+        QuickAction("94% AMOLED", "Audit", Icons.Default.BatteryChargingFull, AuraSuccess, onAmoledAuditClick)
     )
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         actions.forEach { action ->
@@ -91,8 +121,8 @@ fun QuickActionRow() {
                     .clip(RoundedCornerShape(16.dp))
                     .background(DarkSurface)
                     .border(1.dp, DarkBorder, RoundedCornerShape(16.dp))
-                    .clickable { }
-                    .padding(vertical = 10.dp, horizontal = 4.dp),
+                    .clickable { action.onClick() }
+                    .padding(vertical = 10.dp, horizontal = 6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Box(
@@ -114,9 +144,9 @@ fun TrendingCard(rank: Int, wallpaper: RemoteWallpaper, onImport: () -> Unit) {
     Column(
         modifier = Modifier
             .width(170.dp)
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(24.dp))
             .background(DarkSurface)
-            .border(1.dp, DarkBorder, RoundedCornerShape(20.dp))
+            .border(1.dp, DarkBorder, RoundedCornerShape(24.dp))
     ) {
         Box(modifier = Modifier.fillMaxWidth().height(90.dp)) {
             AsyncImage(
@@ -136,7 +166,7 @@ fun TrendingCard(rank: Int, wallpaper: RemoteWallpaper, onImport: () -> Unit) {
         Column(Modifier.padding(10.dp)) {
             Text(wallpaper.title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
             Spacer(Modifier.height(2.dp))
-            Text("AURA-${wallpaper.id.uppercase()}", color = TextMuted, fontSize = 9.sp)
+            Text("AURA-${wallpaper.id.uppercase()}", color = TextMuted, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
             Spacer(Modifier.height(8.dp))
             Surface(
                 color = Color.White.copy(alpha = 0.08f),
@@ -144,7 +174,7 @@ fun TrendingCard(rank: Int, wallpaper: RemoteWallpaper, onImport: () -> Unit) {
                 border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
                modifier = Modifier.fillMaxWidth().clickable { onImport() }
             ) {
-                Text("Import Setup", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(4.dp))
+                Text("Import & Apply", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(4.dp))
             }
         }
     }

@@ -9,17 +9,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aura.launcher.core.theme.*
+import com.aura.launcher.core.utils.AppWidgetHostHelper
 
 val BuiltInWidgetsList = listOf(
     AuraWidgetInfo(
@@ -55,9 +55,17 @@ val BuiltInWidgetsList = listOf(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WidgetPickerSheet(
+    appWidgetHostHelper: AppWidgetHostHelper,
     onDismiss: () -> Unit,
     onSelectWidget: (AuraWidgetInfo) -> Unit
 ) {
+    // Real device widgets load async — starts empty, fills in once the query returns.
+    var systemWidgets by remember { mutableStateOf<List<AuraWidgetInfo>>(emptyList()) }
+
+    LaunchedEffect(Unit) {
+        systemWidgets = appWidgetHostHelper.getAvailableWidgets()
+    }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = DarkSurface,
@@ -90,14 +98,21 @@ fun WidgetPickerSheet(
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                item {
+                    Text(text = "Aura Widgets", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
                 items(BuiltInWidgetsList) { widget ->
-                    WidgetPickerCard(
-                        widget = widget,
-                        onClick = {
-                            onSelectWidget(widget)
-                            onDismiss()
-                        }
-                    )
+                    WidgetPickerCard(widget = widget, onClick = { onSelectWidget(widget); onDismiss() })
+                }
+
+                if (systemWidgets.isNotEmpty()) {
+                    item {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(text = "Device Widgets", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                    items(systemWidgets) { widget ->
+                        WidgetPickerCard(widget = widget, onClick = { onSelectWidget(widget); onDismiss() })
+                    }
                 }
             }
         }
@@ -133,6 +148,7 @@ fun WidgetPickerCard(
                                 WidgetType.ANALOG_CLOCK -> listOf(AuraPurple, AuraPink)
                                 WidgetType.BATTERY_GAUGE -> listOf(AuraCyan, Color(0xFF00E676))
                                 WidgetType.WEATHER_CARD -> listOf(AuraAmber, AuraPink)
+                                WidgetType.SYSTEM_WIDGET -> listOf(Color(0xFF616161), Color(0xFF9E9E9E))
                                 else -> listOf(AuraPurple, AuraCyan)
                             }
                         )
@@ -145,6 +161,7 @@ fun WidgetPickerCard(
                         WidgetType.ANALOG_CLOCK -> Icons.Default.Schedule
                         WidgetType.BATTERY_GAUGE -> Icons.Default.BatteryChargingFull
                         WidgetType.WEATHER_CARD -> Icons.Default.WbSunny
+                        WidgetType.SYSTEM_WIDGET -> Icons.Default.Widgets
                         else -> Icons.Default.Widgets
                     },
                     contentDescription = null,

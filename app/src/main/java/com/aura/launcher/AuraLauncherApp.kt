@@ -7,15 +7,19 @@ import com.aura.launcher.core.datastore.AuthPreferences
 import com.aura.launcher.core.datastore.LauncherPreferences
 import com.aura.launcher.core.network.ApiClient
 import com.aura.launcher.core.utils.PackageManagerHelper
+import com.aura.launcher.core.utils.AppWidgetHostHelper
 import com.aura.launcher.data.remote.api.*
 import com.aura.launcher.data.repository.*
 import com.aura.launcher.domain.repository.*
 import com.aura.launcher.domain.usecase.*
+import com.aura.launcher.receiver.AppChangeCallbackManager
 
 class AuraLauncherApp : Application() {
 
     lateinit var database: AppDatabase private set
     lateinit var packageManagerHelper: PackageManagerHelper private set
+    lateinit var appWidgetHostHelper: AppWidgetHostHelper private set
+    lateinit var appChangeCallbackManager: AppChangeCallbackManager private set
     lateinit var launcherPreferences: LauncherPreferences private set
     lateinit var authPreferences: AuthPreferences private set
 
@@ -46,6 +50,7 @@ class AuraLauncherApp : Application() {
         // Core singletons
         database = AppDatabase.getDatabase(this)
         packageManagerHelper = PackageManagerHelper(this)
+        appWidgetHostHelper = AppWidgetHostHelper(this)
         launcherPreferences = LauncherPreferences(this)
         authPreferences = AuthPreferences(this)
 
@@ -75,6 +80,10 @@ class AuraLauncherApp : Application() {
         manageHomeItemsUseCase = ManageHomeItemsUseCase(homeRepository, appRepository)
         authUseCase = AuthUseCase(authRepository)
         manageSavedSetupsUseCase = ManageSavedSetupsUseCase(savedSetupRepository, homeRepository)
+
+        // Start listening for app install/uninstall/update (LauncherApps.Callback)
+        appChangeCallbackManager = AppChangeCallbackManager(this)
+        appChangeCallbackManager.startListening()
     }
 
     companion object {

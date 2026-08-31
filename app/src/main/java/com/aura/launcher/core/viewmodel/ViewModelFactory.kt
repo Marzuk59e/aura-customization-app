@@ -19,13 +19,15 @@ class ViewModelFactory(private val app: AuraLauncherApp) : ViewModelProvider.Fac
                 HomeViewModel(
                     app.manageHomeItemsUseCase,
                     app.getInstalledAppsUseCase,
-                    app.launchAppUseCase
+                    app.launchAppUseCase,
+                    app.appWidgetHostHelper
                 ) as T
             }
             modelClass.isAssignableFrom(AppDrawerViewModel::class.java) -> {
                 AppDrawerViewModel(
                     app.getInstalledAppsUseCase,
-                    app.launchAppUseCase
+                    app.launchAppUseCase,
+                    app.packageManagerHelper
                 ) as T
             }
             modelClass.isAssignableFrom(AuthViewModel::class.java) -> {

@@ -34,7 +34,7 @@ object SoundEngine {
     fun init(context: Context) {
         if (toneGenerator == null) {
             toneGenerator = runCatching {
-                ToneGenerator(AudioManager.STREAM_SYSTEM, /* volume 0-100 */ 55)
+            ToneGenerator(AudioManager.STREAM_MUSIC, /* volume 0-100 */ 90)
             }.getOrNull()
         }
         if (vibrator == null) {

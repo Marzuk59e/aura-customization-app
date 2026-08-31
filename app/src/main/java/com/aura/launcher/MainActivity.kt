@@ -156,4 +156,14 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onStart() {
+        super.onStart()
+        (application as AuraLauncherApp).appWidgetHostHelper.startListening()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        (application as AuraLauncherApp).appWidgetHostHelper.stopListening()
+    }
 }

@@ -81,9 +81,19 @@ class WallpaperRepositoryImpl(
         val found = defaultWallpapers.find { it.id == id }
         return if (found != null) NetworkResult.Success(found) else NetworkResult.Error(404, "Wallpaper not found")
     }
-
-    override suspend fun applyWallpaper(imageUrl: String): Boolean = withContext(Dispatchers.IO) {
+    
+        override suspend fun applyWallpaperBitmap(bitmap: android.graphics.Bitmap): Boolean = withContext(Dispatchers.IO) {
         try {
+            WallpaperManager.getInstance(context).setBitmap(bitmap)
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+    override suspend fun applyWallpaper(imageUrl: String): Boolean = withContext(Dispatchers.IO) { 
+         try {
             val wallpaperManager = WallpaperManager.getInstance(context)
             val url = URL(imageUrl)
             val bitmap = BitmapFactory.decodeStream(url.openConnection().getInputStream())

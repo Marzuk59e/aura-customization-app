@@ -1,5 +1,6 @@
 package com.aura.launcher.launcher.home
 
+import android.content.ComponentName
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
@@ -38,6 +39,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.aura.launcher.core.theme.*
 import com.aura.launcher.customization.icons.IconPackPickerSheet
 import com.aura.launcher.customization.vibesync.VibeSyncDialog
@@ -51,6 +53,7 @@ import com.aura.launcher.domain.model.HomeItem
 import com.aura.launcher.domain.model.HomeItemType
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.ui.draw.drawBehind
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -146,8 +149,9 @@ fun HomeScreen(
                     Box(
                         modifier = Modifier
                             .size(7.dp)
-                            .clip(CircleShape)
-                            .background(AuraSuccess.copy(alpha = dotAlpha))
+                            .drawBehind {
+                                drawCircle(color = AuraSuccess.copy(alpha = dotAlpha))
+                            }
                     )
                     Text(
                         "Aura Default Launcher",
@@ -214,11 +218,19 @@ fun HomeScreen(
                         if (item.itemType == HomeItemType.WIDGET) GridItemSpan(item.spanX) else GridItemSpan(1)
                     }) { item ->
                         if (item.itemType == HomeItemType.WIDGET) {
-                            when (item.widgetProvider) {
-                                WidgetType.ANALOG_CLOCK.name -> AnalogClockWidget(accentColor = vibePalette.vibrant)
-                                WidgetType.BATTERY_GAUGE.name -> BatteryGaugeWidget()
-                                WidgetType.WEATHER_CARD.name -> WeatherCardWidget()
-                                else -> DigitalClockNeonWidget(accentColor = vibePalette.vibrant)
+                            if (item.widgetId != null && item.widgetProvider != null) {
+                                RealWidgetHost(
+                                    appWidgetId = item.widgetId,
+                                    provider = ComponentName.unflattenFromString(item.widgetProvider),
+                                    appWidgetHostHelper = homeViewModel.appWidgetHostHelper
+                                )
+                            } else {
+                                when (item.widgetProvider) {
+                                    WidgetType.ANALOG_CLOCK.name -> AnalogClockWidget(accentColor = vibePalette.vibrant)
+                                    WidgetType.BATTERY_GAUGE.name -> BatteryGaugeWidget()
+                                    WidgetType.WEATHER_CARD.name -> WeatherCardWidget()
+                                    else -> DigitalClockNeonWidget(accentColor = vibePalette.vibrant)
+                                }
                             }
                         } else {
                             HomeGridItem(
@@ -314,6 +326,7 @@ fun HomeScreen(
         // Modals & Bottom Sheets
         if (showWidgetPicker) {
             WidgetPickerSheet(
+                appWidgetHostHelper = homeViewModel.appWidgetHostHelper,
                 onDismiss = { showWidgetPicker = false },
                 onSelectWidget = { homeViewModel.addWidgetToHome(it, pagerState.currentPage) }
             )
@@ -391,5 +404,23 @@ private fun EditToolbarButton(
     ) {
         Icon(icon, contentDescription = label, tint = Color.White, modifier = Modifier.size(15.dp))
         Text(label, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun RealWidgetHost(
+    appWidgetId: Int,
+    provider: ComponentName?,
+    appWidgetHostHelper: com.aura.launcher.core.utils.AppWidgetHostHelper
+) {
+    if (provider == null) return
+    val hostView = remember(appWidgetId) {
+        appWidgetHostHelper.createHostView(appWidgetId, provider)
+    }
+    if (hostView != null) {
+        AndroidView(
+            factory = { hostView },
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }

@@ -8,6 +8,7 @@ interface WallpaperRepository {
     suspend fun getWallpapers(page: Int = 1, category: String? = null): NetworkResult<List<RemoteWallpaper>>
     suspend fun getWallpaperById(id: String): NetworkResult<RemoteWallpaper>
     suspend fun applyWallpaper(imageUrl: String): Boolean
+    suspend fun applyWallpaperBitmap(bitmap: android.graphics.Bitmap): Boolean
 }
 
 interface IconPackRepository {
