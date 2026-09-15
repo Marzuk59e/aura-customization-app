@@ -1,6 +1,9 @@
 package com.aura.launcher.customization.explore
 
 import android.widget.Toast
+import com.aura.launcher.customization.widgets.WidgetPickerSheet
+import com.aura.launcher.customization.widgets.BuiltInWidgetsList
+import com.aura.launcher.customization.widgets.WidgetType
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,13 +25,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.launch
 import com.aura.launcher.core.audio.SoundEngine
 import com.aura.launcher.core.theme.*
 import com.aura.launcher.launcher.home.HomeViewModel
 import com.aura.launcher.launcher.settings.SettingsViewModel
 import com.aura.launcher.customization.vibesync.ExtractedVibePalette
 import com.aura.launcher.customization.icons.IconStylePack
+import kotlinx.coroutines.launch
 import android.graphics.Color as AndroidColor
 
 private enum class StudioTab { EXPLORE, VIBE_SYNC, SURPRISE, AI_STYLIST, HAPTICS, AUDIT }
@@ -71,6 +74,25 @@ private val moodToPreset = mapOf(
     "Night Gaming" to ("GAMING" to "Cyberpunk")
 )
 
+/**
+ * Safety guard: while Aura isn't the phone's actual Home app, none of its
+ * customization actions should touch the real device — not even the
+ * wallpaper. Only calls [block] once the user has explicitly granted the
+ * Home role (see PackageManagerHelper.openDefaultLauncherSettings());
+ * otherwise it just tells the person this is a preview only.
+ */
+fun applyWallpaperSafely(context: android.content.Context, block: () -> Unit) {
+    if (com.aura.launcher.core.utils.PackageManagerHelper(context).isDefaultLauncher()) {
+        block()
+    } else {
+        Toast.makeText(
+            context,
+            "Aura isn't your Home app yet, so this stays a preview — your real wallpaper won't change.",
+            Toast.LENGTH_LONG
+        ).show()
+    }
+}
+
 private fun applyVibePreset(
     presetName: String,
     homeViewModel: HomeViewModel,
@@ -96,7 +118,9 @@ private fun applyVibePreset(
     // home-screen widgets. Previously presets never reached this store.
     settingsViewModel.saveSelectedTheme(presetName, info.primary, info.secondary)
 
-    exploreViewModel.applyWallpaperUrl(wallpaperOverride ?: info.wallpaperUrl) { }
+    applyWallpaperSafely(context) {
+        exploreViewModel.applyWallpaperUrl(wallpaperOverride ?: info.wallpaperUrl) { }
+    }
 
     // Matches AudioEngine.playHapticSound('cyber') on the web preset click.
     SoundEngine.playHapticSound("cyber")
@@ -125,8 +149,23 @@ fun ExploreScreen(
     var showPerfAudit by remember { mutableStateOf(false) }
     var showA11yModal by remember { mutableStateOf(false) }
     var showQuizModal by remember { mutableStateOf(false) }
+    var showWallpaperExplore by remember { mutableStateOf(false) }
+    var showWidgetPicker by remember { mutableStateOf(false) }
+    var showClockPicker by remember { mutableStateOf(false) }
     var isMuted by remember { mutableStateOf(SoundEngine.isMuted) }
-    
+
+    if (showWallpaperExplore) {
+        WallpaperExploreScreen(
+            wallpapers = wallpapers,
+            isLoading = isLoading,
+            onBack = { showWallpaperExplore = false },
+            onApply = { wp ->
+                applyWallpaperSafely(context) { viewModel.applyWallpaper(wp) { } }
+                showWallpaperExplore = false
+            }
+        )
+        return
+    }
 
     Scaffold(containerColor = DarkBg) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
@@ -204,6 +243,9 @@ fun ExploreScreen(
                             onCategoryClick = { cat ->
                                 activeCategory = if (activeCategory == cat) null else cat
                                 cat.tab?.let { viewModel.selectTab(it) }
+                                if (cat.tab == ExploreTab.WALLPAPERS) showWallpaperExplore = true
+                                if (cat.label == "Widgets") showWidgetPicker = true
+                                if (cat.label == "Clock") showClockPicker = true
                                 SoundEngine.playHapticSound("crystal")
                             },
                             activePreset = activePreset,
@@ -224,10 +266,10 @@ fun ExploreScreen(
                             iconPacks = iconPacks,
                             themes = themes,
                             onApplyWallpaper = { wp ->
-                                viewModel.applyWallpaper(wp) { }
+                                applyWallpaperSafely(context) { viewModel.applyWallpaper(wp) { } }
                             },
                             onImportWallpaper = { wp ->
-                                viewModel.applyWallpaper(wp) { }
+                                applyWallpaperSafely(context) { viewModel.applyWallpaper(wp) { } }
                             },
                             onNavigateToVibeSync = { studioTab = StudioTab.VIBE_SYNC },
                             onApplyIconPack = { ip ->
@@ -265,7 +307,8 @@ fun ExploreScreen(
                             onAmoledAuditClick = {
                                 studioTab = StudioTab.AUDIT
                                 SoundEngine.playHapticSound("velvet")
-                            }
+                            },
+                            onApplyToHomeScreen = onBack
                         )
                        StudioTab.VIBE_SYNC -> VibeSyncContent(viewModel, homeViewModel, settingsViewModel)
                         StudioTab.SURPRISE -> SurpriseContent(
@@ -310,6 +353,28 @@ fun ExploreScreen(
                     "Cyberpunk"
                 }
                 applyVibePreset(presetName, homeViewModel, viewModel, settingsViewModel, context)
+                onBack()
+            }
+        )
+    }
+    if (showWidgetPicker) {
+        WidgetPickerSheet(
+            onDismiss = { showWidgetPicker = false },
+            onSelectWidget = { widget ->
+                homeViewModel.addWidgetToHome(widget, 0)
+                SoundEngine.playHapticSound("crystal")
+                onBack()
+            }
+        )
+    }
+    if (showClockPicker) {
+        WidgetPickerSheet(
+            title = "Choose a Clock Style",
+            widgets = BuiltInWidgetsList.filter { it.type == WidgetType.DIGITAL_CLOCK_NEON || it.type == WidgetType.ANALOG_CLOCK },
+            onDismiss = { showClockPicker = false },
+            onSelectWidget = { widget ->
+                homeViewModel.addWidgetToHome(widget, 0)
+                SoundEngine.playHapticSound("crystal")
                 onBack()
             }
         )
@@ -370,21 +435,22 @@ private fun NavTabItem(icon: androidx.compose.ui.graphics.vector.ImageVector, la
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AccessibilityDialog(onDismiss: () -> Unit) {
-    val sheetState = rememberModalBottomSheetState()
-    val scope = rememberCoroutineScope()
-    var selected by remember { mutableStateOf("standard") }
+    val context = LocalContext.current
+    val app = context.applicationContext as com.aura.launcher.AuraLauncherApp
+    val coroutineScope = rememberCoroutineScope()
+    val savedPreset by app.launcherPreferences.accessibilityPresetFlow.collectAsState(initial = "standard")
+    var selected by remember(savedPreset) { mutableStateOf(savedPreset) }
 
-    fun safeDismiss() {
-        scope.launch { sheetState.hide() }.invokeOnCompletion {
-            if (!sheetState.isVisible) {
-                onDismiss()
-            }
+    fun selectPreset(id: String) {
+        selected = id
+        applyAccessibilityPreset(id) // instant live preview
+        coroutineScope.launch {
+            app.launcherPreferences.setAccessibilityPreset(id) // persists across restarts
         }
     }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = sheetState,
         containerColor = DarkSurface,
         shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
         dragHandle = null
@@ -420,21 +486,21 @@ private fun AccessibilityDialog(onDismiss: () -> Unit) {
 
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     A11yOptionCard(
-                        selected = selected == "standard", onClick = { selected = "standard" },
+                        selected = selected == "standard", onClick = { selectPreset("standard") },
                         badgeColor = AuraPink, badgeBg = AuraPink.copy(alpha = 0.15f), badgeBorder = AuraPink.copy(alpha = 0.3f),
                         badge = "STANDARD", title = "Standard High Dynamic",
                         mainPoint = "✦ Full Dynamic Material You Spectrum",
                         desc = "For: General everyday users wanting rich colorful gradients, fluid transparencies, and default vibrant launcher aesthetics."
                     )
                     A11yOptionCard(
-                        selected = selected == "deuteranopia", onClick = { selected = "deuteranopia" },
+                        selected = selected == "deuteranopia", onClick = { selectPreset("deuteranopia") },
                         badgeColor = Color(0xFF38BDF8), badgeBg = Color(0xFF0077FF).copy(alpha = 0.18f), badgeBorder = Color(0xFF0077FF).copy(alpha = 0.4f),
                         badge = "COLOR BLIND HARMONY", title = "Deuteranopia & Protanopia",
                         mainPoint = "👁 High-Contrast Blue & Amber Palette",
                         desc = "For: Users with Red-Green color deficiency. Eliminates confusing red/green mixes by shifting all UI accents into crisp, distinguishable cobalt blue and warm gold."
                     )
                     A11yOptionCard(
-                        selected = selected == "high-contrast", onClick = { selected = "high-contrast" },
+                        selected = selected == "high-contrast", onClick = { selectPreset("high-contrast") },
                         badgeColor = Color.White, badgeBg = Color.White.copy(alpha = 0.15f), badgeBorder = Color.White.copy(alpha = 0.35f),
                         badge = "HIGH VISIBILITY", title = "Extreme High-Contrast Monochrome",
                         mainPoint = "🌙 0% OLED Black & Crisp Stark White",
@@ -449,7 +515,7 @@ private fun AccessibilityDialog(onDismiss: () -> Unit) {
                         .clip(RoundedCornerShape(16.dp))
                         .background(DarkSurfaceVariant)
                         .border(1.dp, DarkBorder, RoundedCornerShape(16.dp))
-                        .clickable { safeDismiss() }
+                        .clickable { onDismiss() }
                         .padding(11.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -474,20 +540,8 @@ private fun PerfMetricRow(label: String, value: String, valueColor: Color) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PerfAuditDialog(onOptimize: () -> Unit, onDismiss: () -> Unit) {
-    val sheetState = rememberModalBottomSheetState()
-    val scope = rememberCoroutineScope()
-
-    fun safeDismiss(onComplete: () -> Unit) {
-        scope.launch { sheetState.hide() }.invokeOnCompletion {
-            if (!sheetState.isVisible) {
-                onComplete()
-            }
-        }
-    }
-
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = sheetState,
         containerColor = DarkSurface,
         shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
     ) {
@@ -540,7 +594,7 @@ private fun PerfAuditDialog(onOptimize: () -> Unit, onDismiss: () -> Unit) {
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
                     .background(Brush.linearGradient(listOf(AuraPink, Color(0xFF990033))))
-                    .clickable(onClick = { safeDismiss(onOptimize) })
+                    .clickable(onClick = onOptimize)
                     .padding(12.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -557,7 +611,7 @@ private fun PerfAuditDialog(onOptimize: () -> Unit, onDismiss: () -> Unit) {
                     .clip(RoundedCornerShape(16.dp))
                     .background(DarkSurfaceVariant)
                     .border(1.dp, DarkBorder, RoundedCornerShape(16.dp))
-                    .clickable { safeDismiss(onDismiss) }
+                    .clickable { onDismiss() }
                     .padding(11.dp),
                 contentAlignment = Alignment.Center
             ) {

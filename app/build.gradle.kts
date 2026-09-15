@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.ksp)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.google.services)
 }
 
 android {
@@ -12,7 +13,7 @@ android {
     defaultConfig {
         applicationId = "com.aura.launcher"
         minSdk = 26
-        targetSdk = 37
+        targetSdk = 34
         versionCode = 2
         versionName = "1.0.0"
 
@@ -84,6 +85,17 @@ dependencies {
 
     // Palette
     implementation(libs.androidx.palette)
+
+    // Firebase (Auth only — user profile data is owned by the PHP backend,
+    // which talks to Firestore server-side via Firebase Admin SDK)
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.auth)
+    implementation(libs.kotlinx.coroutines.play.services)
+
+    // Biometric / device-credential authentication (secure password-reset
+    // device verification — replaces the old simulated OTP step)
+    implementation(libs.androidx.biometric)
+    implementation(libs.androidx.fragment.ktx)
 
     debugImplementation(libs.androidx.ui.tooling)
 }

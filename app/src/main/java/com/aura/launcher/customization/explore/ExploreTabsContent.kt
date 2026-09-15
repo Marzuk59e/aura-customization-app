@@ -67,7 +67,8 @@ fun LazyColumnContent(
     onStyleQuizClick: () -> Unit,
     onSurpriseMeClick: () -> Unit,
     onHapticsClick: () -> Unit,
-    onAmoledAuditClick: () -> Unit
+    onAmoledAuditClick: () -> Unit,
+    onApplyToHomeScreen: () -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -254,18 +255,20 @@ fun LazyColumnContent(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
             ) {
                 Column(Modifier.padding(16.dp)) {
+                    var clockFont by remember { mutableStateOf("Cyberpunk LCD") }
+                    var fontMenuOpen by remember { mutableStateOf(false) }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("Simple-By-Default Live Editor", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                        TextButton(onClick = { /* TODO: AI helper flow */ }) {
+                        TextButton(onClick = {
+                            clockFont = "Cyberpunk LCD"
+                            SoundEngine.playHapticSound("cyber")
+                        }) {
                             Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AuraCyan, modifier = Modifier.size(14.dp))
                             Spacer(Modifier.width(4.dp))
                             Text("Ask AI Helper", color = AuraCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                     Spacer(Modifier.height(12.dp))
-
-                    var clockFont by remember { mutableStateOf("Cyberpunk LCD") }
-                    var fontMenuOpen by remember { mutableStateOf(false) }
                     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("Active Clock Typography", color = TextSecondary, fontSize = 13.sp)
                         Box {
@@ -281,12 +284,30 @@ fun LazyColumnContent(
                         }
                     }
 
+                    var accentMenuOpen by remember { mutableStateOf(false) }
+                    val accentPresets = listOf(Color(0xFFFF0055), Color(0xFF00E5FF), Color(0xFFA855F7), Color(0xFFFF8C42), Color(0xFF10B981), Color(0xFFE2E8F0))
                     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("Accent Color", color = TextSecondary, fontSize = 13.sp)
-                        Box(
-                            Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)).background(AuraPink)
-                                .clickable { /* TODO: open color picker */ }
-                        )
+                        Box {
+                            Box(
+                                Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)).background(AuraPink)
+                                    .clickable { accentMenuOpen = true }
+                            )
+                            DropdownMenu(expanded = accentMenuOpen, onDismissRequest = { accentMenuOpen = false }) {
+                                Row(Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    accentPresets.forEach { swatch ->
+                                        Box(
+                                            Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)).background(swatch)
+                                                .clickable {
+                                                    applyThemePalette(primary = swatch)
+                                                    SoundEngine.playHapticSound("crystal")
+                                                    accentMenuOpen = false
+                                                }
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     var widgetOpacity by remember { mutableStateOf(85f) }
@@ -363,7 +384,10 @@ fun LazyColumnContent(
                     .height(48.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .background(Brush.linearGradient(listOf(AuraPink, Color(0xFF990033))))
-                    .clickable { /* TODO: wire to actual "apply to real home screen" flow */ },
+                    .clickable {
+                        SoundEngine.playHapticSound("velvet")
+                        onApplyToHomeScreen()
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

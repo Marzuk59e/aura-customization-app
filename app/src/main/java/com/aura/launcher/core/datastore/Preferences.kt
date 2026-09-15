@@ -27,7 +27,6 @@ class LauncherPreferences(private val context: Context) {
         val SHOW_LABELS = booleanPreferencesKey("show_labels")
         val DARK_THEME = booleanPreferencesKey("dark_theme")
         val IS_INITIALIZED = booleanPreferencesKey("is_initialized")
-        val HAS_SEEN_WELCOME = booleanPreferencesKey("has_seen_welcome")
 
         // New customization persistence keys
         val SELECTED_ICON_PACK = stringPreferencesKey("selected_icon_pack")
@@ -35,6 +34,7 @@ class LauncherPreferences(private val context: Context) {
         val SELECTED_THEME_PRIMARY = stringPreferencesKey("selected_theme_primary")
         val SELECTED_THEME_SECONDARY = stringPreferencesKey("selected_theme_secondary")
         val SELECTED_FONT = stringPreferencesKey("selected_font")
+        val ACCESSIBILITY_PRESET = stringPreferencesKey("accessibility_preset")
     }
 
     val settingsFlow: Flow<LauncherSettings> = context.launcherDataStore.data.map { prefs ->
@@ -61,8 +61,15 @@ class LauncherPreferences(private val context: Context) {
         prefs[IS_INITIALIZED] ?: false
     }
 
-    val hasSeenWelcomeFlow: Flow<Boolean> = context.launcherDataStore.data.map { prefs ->
-        prefs[HAS_SEEN_WELCOME] ?: false
+    // "standard" | "deuteranopia" | "high-contrast"
+    val accessibilityPresetFlow: Flow<String> = context.launcherDataStore.data.map { prefs ->
+        prefs[ACCESSIBILITY_PRESET] ?: "standard"
+    }
+
+    suspend fun setAccessibilityPreset(preset: String) {
+        context.launcherDataStore.edit { prefs ->
+            prefs[ACCESSIBILITY_PRESET] = preset
+        }
     }
 
     suspend fun updateGrid(rows: Int, cols: Int) {
@@ -119,11 +126,6 @@ class LauncherPreferences(private val context: Context) {
         }
     }
 
-    suspend fun setHasSeenWelcome(seen: Boolean) {
-        context.launcherDataStore.edit { prefs ->
-            prefs[HAS_SEEN_WELCOME] = seen
-        }
-    }
 }
 
 class AuthPreferences(private val context: Context) {

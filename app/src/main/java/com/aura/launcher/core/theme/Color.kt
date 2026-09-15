@@ -16,6 +16,7 @@ var AuraCyan by mutableStateOf(Color(0xFF00E5FF))        // --accent-secondary
 var AuraPink by mutableStateOf(Color(0xFFFF0055))        // --accent-primary
 var AuraAmber by mutableStateOf(Color(0xFFF59E0B))       // --color-warning
 var AuraSuccess by mutableStateOf(Color(0xFF10B981))     // --color-success
+var AuraDanger by mutableStateOf(Color(0xFFFF4D6D))      // --color-danger (validation / error text)
 
 var DarkBg by mutableStateOf(Color(0xFF05070C))          // --bg-app
 var DarkSurface by mutableStateOf(Color(0xFF10131C))     // --bg-card
@@ -40,6 +41,7 @@ fun resetDefaultPalette() {
     AuraPink = Color(0xFFFF0055)
     AuraAmber = Color(0xFFF59E0B)
     AuraSuccess = Color(0xFF10B981)
+    AuraDanger = Color(0xFFFF4D6D)
 
     DarkBg = Color(0xFF05070C)
     DarkSurface = Color(0xFF10131C)
@@ -97,5 +99,34 @@ fun applyThemePalette(
         DarkSurfaceGlass = Color(0xE010131C)
         DarkSurfaceVariant = Color(0xFF181D2A)
         DarkBorder = Color(0x14FFFFFF)
+    }
+}
+
+// Applied on top of the normal theme palette. "standard" is a no-op (keeps
+// whatever theme/vibe-sync colors are already active); the other two presets
+// override accents and/or contrast for accessibility.
+fun applyAccessibilityPreset(preset: String) {
+    when (preset) {
+        "deuteranopia" -> {
+            // Cobalt blue + warm amber/gold — avoids red/green confusion.
+            AuraPink = Color(0xFF0077FF)
+            AuraCyan = Color(0xFFF5A623)
+        }
+        "high-contrast" -> {
+            // 0% OLED black + stark white, zero-glare, bold outlines.
+            DarkBg = Color(0xFF000000)
+            DarkSurface = Color(0xFF000000)
+            DarkSurfaceGlass = Color(0xFF000000)
+            DarkSurfaceVariant = Color(0xFF000000)
+            DarkBorder = Color(0xFFFFFFFF)
+            TextPrimary = Color(0xFFFFFFFF)
+            TextSecondary = Color(0xFFFFFFFF)
+            TextMuted = Color(0xFFE5E5E5)
+            AuraPink = Color(0xFFFFFFFF)
+            AuraCyan = Color(0xFFFFFFFF)
+        }
+        else -> {
+            // "standard" — no override, leave the current theme colors as-is.
+        }
     }
 }

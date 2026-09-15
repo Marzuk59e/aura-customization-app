@@ -54,6 +54,7 @@ fun AuraLauncherTheme(
     val context = LocalContext.current
     val launcherPreferences = remember(context) { LauncherPreferences(context.applicationContext) }
     val customization by launcherPreferences.customizationFlow.collectAsState(initial = SelectedCustomizationTheme())
+    val accessibilityPreset by launcherPreferences.accessibilityPresetFlow.collectAsState(initial = "standard")
 
     val primaryColor = remember(customization.primaryColor) {
         try {
@@ -78,8 +79,9 @@ fun AuraLauncherTheme(
         }
     }
 
-    LaunchedEffect(primaryColor, secondaryColor, darkTheme) {
+    LaunchedEffect(primaryColor, secondaryColor, darkTheme, accessibilityPreset) {
         applyThemePalette(primary = primaryColor, secondary = secondaryColor, darkMode = darkTheme)
+        applyAccessibilityPreset(accessibilityPreset)
     }
     LaunchedEffect(selectedFontFamily) {
         applyTypography(selectedFontFamily)

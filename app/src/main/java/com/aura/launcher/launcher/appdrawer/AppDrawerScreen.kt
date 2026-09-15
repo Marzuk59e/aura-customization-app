@@ -1,5 +1,7 @@
 package com.aura.launcher.launcher.appdrawer
 
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -9,8 +11,8 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -21,12 +23,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.aura.launcher.core.utils.rememberAppIconBitmap
 import com.aura.launcher.core.theme.*
 import com.aura.launcher.domain.model.AppInfo
 
@@ -125,6 +129,8 @@ fun AppDrawerItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val iconBitmap: Bitmap? = rememberAppIconBitmap(app.packageName, app.activityName)
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -139,12 +145,20 @@ fun AppDrawerItem(
                 .background(DarkSurface),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = app.label.take(1).uppercase(),
-                color = AuraCyan,
-                fontWeight = FontWeight.Bold,
-                fontSize = 20.sp
-            )
+            if (iconBitmap != null) {
+                Image(
+                    bitmap = iconBitmap.asImageBitmap(),
+                    contentDescription = app.label,
+                    modifier = Modifier.size(40.dp)
+                )
+            } else {
+                Text(
+                    text = app.label.take(1).uppercase(),
+                    color = AuraCyan,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(5.dp))

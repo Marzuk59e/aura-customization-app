@@ -3,12 +3,12 @@ package com.aura.launcher.launcher.home
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.aura.launcher.core.utils.AppWidgetHostHelper
 import com.aura.launcher.customization.icons.IconShape
 import com.aura.launcher.customization.icons.IconStylePack
 import com.aura.launcher.customization.vibesync.ExtractedVibePalette
 import com.aura.launcher.customization.widgets.AuraWidgetInfo
 import com.aura.launcher.customization.widgets.WidgetType
+import com.aura.launcher.domain.model.Folder
 import com.aura.launcher.domain.model.HomeItem
 import com.aura.launcher.domain.model.HomeItemType
 import com.aura.launcher.domain.usecase.GetInstalledAppsUseCase
@@ -20,8 +20,7 @@ import kotlinx.coroutines.launch
 class HomeViewModel(
     private val manageHomeItemsUseCase: ManageHomeItemsUseCase,
     private val getInstalledAppsUseCase: GetInstalledAppsUseCase,
-    private val launchAppUseCase: LaunchAppUseCase,
-    val appWidgetHostHelper: AppWidgetHostHelper
+    private val launchAppUseCase: LaunchAppUseCase
 ) : ViewModel() {
 
     val page0Items: StateFlow<List<HomeItem>> = manageHomeItemsUseCase.getPageItems(0)
@@ -67,40 +66,17 @@ class HomeViewModel(
 
     fun addWidgetToHome(widget: AuraWidgetInfo, pageIndex: Int = 0) {
         viewModelScope.launch {
-            val provider = widget.componentName
-
-            if (widget.type == WidgetType.SYSTEM_WIDGET && provider != null) {
-                // Real Android widget: allocate + bind before saving.
-                val widgetId = appWidgetHostHelper.allocateAppWidgetId()
-                val bound = appWidgetHostHelper.bindWidgetIfAllowed(widgetId, provider)
-                if (!bound) return@launch // permission not granted, silently skip for now
-
-                val item = HomeItem(
-                    pageIndex = pageIndex,
-                    cellX = 0,
-                    cellY = 0,
-                    spanX = widget.spanX,
-                    spanY = widget.spanY,
-                    itemType = HomeItemType.WIDGET,
-                    label = widget.title,
-                    widgetId = widgetId,
-                    widgetProvider = provider.flattenToString()
-                )
-                manageHomeItemsUseCase.addItem(item)
-            } else {
-                // Built-in Aura widget (Clock/Battery/Weather) — same as before.
-                val item = HomeItem(
-                    pageIndex = pageIndex,
-                    cellX = 0,
-                    cellY = 0,
-                    spanX = widget.spanX,
-                    spanY = widget.spanY,
-                    itemType = HomeItemType.WIDGET,
-                    label = widget.title,
-                    widgetProvider = widget.type.name
-                )
-                manageHomeItemsUseCase.addItem(item)
-            }
+            val item = HomeItem(
+                pageIndex = pageIndex,
+                cellX = 0,
+                cellY = 0,
+                spanX = widget.spanX,
+                spanY = widget.spanY,
+                itemType = HomeItemType.WIDGET,
+                label = widget.title,
+                widgetProvider = widget.type.name
+            )
+            manageHomeItemsUseCase.addItem(item)
         }
     }
 
@@ -116,7 +92,83 @@ class HomeViewModel(
         _vibePalette.value = palette
     }
 
+    private val _activeFolder = MutableStateFlow<Folder?>(null)
+    val activeFolder: StateFlow<Folder?> = _activeFolder.asStateFlow()
+
+    fun openFolder(folderId: Long) {
+        viewModelScope.launch {
+            val folder = manageHomeItemsUseCase.getFolder(folderId)
+            _activeFolder.value = folder
+        }
+    }
+
+    fun closeFolder() {
+        _activeFolder.value = null
+    }
+
+    fun renameFolder(folderId: Long, newTitle: String) {
+        viewModelScope.launch {
+            val current = _activeFolder.value ?: return@launch
+            val appKeys = current.apps.map { it.componentKey }
+            manageHomeItemsUseCase.updateFolder(folderId, newTitle, appKeys)
+            _activeFolder.value = current.copy(title = newTitle)
+
+            // Also update the HomeItem label
+            val all = allHomeItems.value
+            val folderItem = all.firstOrNull { it.folderId == folderId }
+            if (folderItem != null) {
+                manageHomeItemsUseCase.updateItem(folderItem.copy(label = newTitle))
+            }
+        }
+    }
+
+    fun createFolderWithItems(title: String, item1: HomeItem, item2: HomeItem, pageIndex: Int) {
+        viewModelScope.launch {
+            val keys = mutableListOf<String>()
+            item1.packageName?.let { pkg ->
+                item1.activityName?.let { act -> keys.add("$pkg/$act") }
+            }
+            item2.packageName?.let { pkg ->
+                item2.activityName?.let { act -> keys.add("$pkg/$act") }
+            }
+
+            val folderId = manageHomeItemsUseCase.createFolder(title, "#7000FF", keys)
+
+            // Remove original items and insert folder item
+            manageHomeItemsUseCase.removeItem(item1.id)
+            manageHomeItemsUseCase.removeItem(item2.id)
+
+            val folderHomeItem = HomeItem(
+                pageIndex = pageIndex,
+                cellX = item1.cellX,
+                cellY = item1.cellY,
+                itemType = HomeItemType.FOLDER,
+                label = title,
+                folderId = folderId
+            )
+            manageHomeItemsUseCase.addItem(folderHomeItem)
+        }
+    }
+
+    fun moveHomeItem(itemId: Long, targetPageIndex: Int, targetCellX: Int, targetCellY: Int) {
+        viewModelScope.launch {
+            val all = allHomeItems.value
+            val target = all.firstOrNull { it.id == itemId } ?: return@launch
+            manageHomeItemsUseCase.updateItem(
+                target.copy(
+                    pageIndex = targetPageIndex,
+                    cellX = targetCellX,
+                    cellY = targetCellY
+                )
+            )
+        }
+    }
+
     fun launchHomeItem(item: HomeItem) {
+        if (item.itemType == HomeItemType.FOLDER && item.folderId != null) {
+            openFolder(item.folderId)
+            return
+        }
         val pkg = item.packageName ?: return
         viewModelScope.launch {
             launchAppUseCase(pkg, item.activityName)
@@ -125,10 +177,10 @@ class HomeViewModel(
 
     fun removeHomeItem(item: HomeItem) {
         viewModelScope.launch {
-            if (item.itemType == HomeItemType.WIDGET && item.widgetId != null) {
-                appWidgetHostHelper.deleteAppWidgetId(item.widgetId)
-            }
             manageHomeItemsUseCase.removeItem(item.id)
+            if (item.folderId != null) {
+                manageHomeItemsUseCase.deleteFolder(item.folderId)
+            }
         }
     }
 }

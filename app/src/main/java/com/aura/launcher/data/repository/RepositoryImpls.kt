@@ -5,11 +5,21 @@ import com.aura.launcher.core.datastore.LauncherPreferences
 import com.aura.launcher.core.utils.PackageManagerHelper
 import com.aura.launcher.data.local.dao.*
 import com.aura.launcher.data.local.entities.*
+import com.aura.launcher.core.security.DeviceCredentialManager
+import com.aura.launcher.data.remote.api.AuthApi
+import com.aura.launcher.data.remote.api.DeviceAuthApi
+import com.aura.launcher.data.remote.dto.DeviceChallengeRequestDto
+import com.aura.launcher.data.remote.dto.DeviceRegisterRequestDto
+import com.aura.launcher.data.remote.dto.DeviceVerifyResetRequestDto
+import com.aura.launcher.data.remote.dto.DeviceVerifyLoginRequestDto
 import com.aura.launcher.domain.model.*
 import com.aura.launcher.domain.repository.*
+import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.tasks.await
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -52,7 +62,9 @@ class AppRepositoryImpl(
 
 class HomeRepositoryImpl(
     private val homeItemDao: HomeItemDao,
-    private val launcherPreferences: LauncherPreferences
+    private val launcherPreferences: LauncherPreferences,
+    private val folderDao: FolderDao? = null,
+    private val appDao: AppDao? = null
 ) : HomeRepository {
 
     override fun getItemsForPage(pageIndex: Int): Flow<List<HomeItem>> {
@@ -123,50 +135,199 @@ class HomeRepositoryImpl(
         homeItemDao.insertItems((defaultDock + defaultHome).map { it.toEntity() })
         launcherPreferences.setInitialized(true)
     }
+
+    override suspend fun getFolder(folderId: Long): Folder? {
+        val entity = folderDao?.getFolderById(folderId) ?: return null
+        val appKeys = try {
+            val arr = JSONArray(entity.appKeysJson)
+            (0 until arr.length()).map { arr.getString(it) }
+        } catch (e: Exception) {
+            emptyList()
+        }
+
+        val apps = mutableListOf<AppInfo>()
+        for (key in appKeys) {
+            val appEntity = appDao?.getAppByKey(key)
+            if (appEntity != null) {
+                apps.add(appEntity.toDomain())
+            }
+        }
+
+        return Folder(
+            id = entity.id,
+            title = entity.title,
+            color = entity.color,
+            apps = apps
+        )
+    }
+
+    override suspend fun createFolder(title: String, color: String, appKeys: List<String>): Long {
+        val json = JSONArray(appKeys).toString()
+        val entity = FolderEntity(
+            title = title,
+            color = color,
+            appKeysJson = json
+        )
+        return folderDao?.insertFolder(entity) ?: 0L
+    }
+
+    override suspend fun updateFolder(folderId: Long, title: String, appKeys: List<String>) {
+        val json = JSONArray(appKeys).toString()
+        val entity = FolderEntity(
+            id = folderId,
+            title = title,
+            appKeysJson = json
+        )
+        folderDao?.updateFolder(entity)
+    }
+
+    override suspend fun deleteFolder(folderId: Long) {
+        val entity = folderDao?.getFolderById(folderId)
+        if (entity != null) {
+            folderDao.deleteFolder(entity)
+        }
+    }
 }
 
 class AuthRepositoryImpl(
     private val userDao: UserDao,
-    private val authPreferences: AuthPreferences
+    private val authPreferences: AuthPreferences,
+    private val firebaseAuth: FirebaseAuth,
+    private val authApi: AuthApi
 ) : AuthRepository {
 
-    override val currentUserFlow: Flow<User?> = userDao.getCurrentUser().map { it?.toDomain() }
+    // aura_launcher.db is included in Android's cloud-backup / device-transfer rules
+    // (see xml/backup_rules.xml), so the Room row alone isn't a safe signal after a
+    // fresh install: a restored backup could bring back a "logged in" user row even
+    // though the person just reinstalled the app. authPreferences (DataStore) is NOT
+    // included in those backup rules, so we only trust a session when both agree.
+    override val currentUserFlow: Flow<User?> = combine(
+        userDao.getCurrentUser(),
+        authPreferences.activeUserIdFlow
+    ) { userEntity, activeUserId ->
+        if (userEntity != null && activeUserId != null && userEntity.id == activeUserId) {
+            userEntity.toDomain()
+        } else {
+            null
+        }
+    }
 
     override suspend fun getCurrentUser(): User? {
         return userDao.getCurrentUserDirect()?.toDomain()
     }
 
     override suspend fun signUp(email: String, name: String, passwordHash: String): Result<User> {
-        val existing = userDao.getUserByEmail(email)
-        if (existing != null) {
-            return Result.failure(Exception("An account with this email already exists."))
+        return try {
+            val authResult = firebaseAuth.createUserWithEmailAndPassword(email, passwordHash).await()
+            val firebaseUser = authResult.user
+                ?: return Result.failure(Exception("Sign up failed. Please try again."))
+
+            val profileUpdate = com.google.firebase.auth.UserProfileChangeRequest.Builder()
+                .setDisplayName(name)
+                .build()
+            firebaseUser.updateProfile(profileUpdate).await()
+
+            // The backend provisions the Firestore user document on first
+            // authenticated call and returns the canonical profile — the app
+            // never writes user profile fields directly to Firestore.
+            val user = syncProfileFromBackend(firebaseUser.uid, fallbackEmail = email, fallbackName = name)
+            authPreferences.saveSession(firebaseUser.uid, isGuest = false)
+
+            Result.success(user)
+        } catch (e: com.google.firebase.auth.FirebaseAuthUserCollisionException) {
+            Result.failure(Exception("An account with this email already exists."))
+        } catch (e: com.google.firebase.auth.FirebaseAuthWeakPasswordException) {
+            Result.failure(Exception("Password is too weak. Please choose a stronger one."))
+        } catch (e: com.google.firebase.auth.FirebaseAuthInvalidCredentialsException) {
+            Result.failure(Exception("Please enter a valid email address."))
+        } catch (e: Exception) {
+            Result.failure(Exception(e.message ?: "Sign up failed. Please check your connection."))
         }
-        val userId = UUID.randomUUID().toString()
+    }
+
+    override suspend fun login(email: String, passwordHash: String): Result<User> {
+        return try {
+            val authResult = firebaseAuth.signInWithEmailAndPassword(email, passwordHash).await()
+            val firebaseUser = authResult.user
+                ?: return Result.failure(Exception("Login failed. Please try again."))
+
+            val user = syncProfileFromBackend(
+                firebaseUser.uid,
+                fallbackEmail = email,
+                fallbackName = firebaseUser.displayName ?: email.substringBefore("@")
+            )
+            authPreferences.saveSession(firebaseUser.uid, isGuest = false)
+
+            Result.success(user)
+        } catch (e: com.google.firebase.auth.FirebaseAuthInvalidUserException) {
+            Result.failure(Exception("Account not found. Please sign up."))
+        } catch (e: com.google.firebase.auth.FirebaseAuthInvalidCredentialsException) {
+            Result.failure(Exception("Incorrect email or password."))
+        } catch (e: Exception) {
+            Result.failure(Exception(e.message ?: "Login failed. Please check your connection."))
+        }
+    }
+
+    /**
+     * Same finish line as [login] (sync profile, save session) but starting
+     * from a Firebase custom token instead of email+password — used after a
+     * device-verified forgot-password login (see verify-login.php).
+     */
+    override suspend fun loginWithCustomToken(signInToken: String): Result<User> {
+        return try {
+            val authResult = firebaseAuth.signInWithCustomToken(signInToken).await()
+            val firebaseUser = authResult.user
+                ?: return Result.failure(Exception("Sign-in failed. Please try again."))
+
+            val user = syncProfileFromBackend(
+                firebaseUser.uid,
+                fallbackEmail = firebaseUser.email ?: "",
+                fallbackName = firebaseUser.displayName ?: (firebaseUser.email ?: "").substringBefore("@")
+            )
+            authPreferences.saveSession(firebaseUser.uid, isGuest = false)
+
+            Result.success(user)
+        } catch (e: Exception) {
+            Result.failure(Exception(e.message ?: "Sign-in failed. Please check your connection."))
+        }
+    }
+
+    /**
+     * Calls GET /auth/me (backend verifies the Firebase ID token attached by
+     * AuthInterceptor) to fetch/provision the canonical profile, then caches
+     * it locally for offline access. Falls back to Firebase-only info if the
+     * backend is unreachable, so login still works offline after the first
+     * successful sync.
+     */
+    private suspend fun syncProfileFromBackend(uid: String, fallbackEmail: String, fallbackName: String): User {
+        var name: String = fallbackName
+        var email: String = fallbackEmail
+        var avatarUrl: String? = null
+        try {
+            val response = authApi.me()
+            val profile = if (response.isSuccessful) response.body() else null
+            name = profile?.name ?: fallbackName
+            email = profile?.email ?: fallbackEmail
+            avatarUrl = profile?.photoUrl
+        } catch (e: Exception) {
+            // Offline or backend down — Firebase-only defaults above already apply.
+        }
+
         val userEntity = UserEntity(
-            id = userId,
+            id = uid,
             email = email,
             displayName = name,
-            avatarUrl = null,
+            avatarUrl = avatarUrl,
             isGuest = false,
             isCurrentLoggedIn = true
         )
         userDao.clearCurrentSessions()
         userDao.insertOrUpdateUser(userEntity)
-        authPreferences.saveSession(userId, isGuest = false)
-        return Result.success(userEntity.toDomain())
-    }
-
-    override suspend fun login(email: String, passwordHash: String): Result<User> {
-        val existing = userDao.getUserByEmail(email)
-            ?: return Result.failure(Exception("Account not found. Please sign up."))
-        
-        userDao.clearCurrentSessions()
-        userDao.setCurrentSession(existing.id)
-        authPreferences.saveSession(existing.id, isGuest = false)
-        return Result.success(existing.toDomain())
+        return userEntity.toDomain()
     }
 
     override suspend fun continueAsGuest(): User {
+        // Guest mode stays fully local/offline — no Firebase account is created.
         val guestId = "guest_" + UUID.randomUUID().toString().take(8)
         val guestEntity = UserEntity(
             id = guestId,
@@ -182,8 +343,174 @@ class AuthRepositoryImpl(
     }
 
     override suspend fun logout() {
+        firebaseAuth.signOut()
         userDao.clearCurrentSessions()
         authPreferences.clearSession()
+    }
+}
+
+/**
+ * Secure device authentication for password reset — see
+ * domain.repository.DeviceAuthRepository for the full contract. This class
+ * never decides trust locally: [checkDeviceTrust] and
+ * [verifyDeviceAndResetPassword] both defer entirely to the backend.
+ */
+class DeviceAuthRepositoryImpl(
+    private val deviceCredentialManager: DeviceCredentialManager,
+    private val trustedDeviceDao: TrustedDeviceDao,
+    private val deviceAuthApi: DeviceAuthApi,
+    private val firebaseAuth: FirebaseAuth
+) : DeviceAuthRepository {
+
+    override fun getDeviceSecurityCapability(): DeviceSecurityCapability =
+        deviceCredentialManager.getDeviceSecurityCapability()
+
+    override suspend fun hasLocalDeviceKey(userId: String): Boolean {
+        val entity = trustedDeviceDao.getForUser(userId)
+        return entity != null && entity.isActive && deviceCredentialManager.hasKey(userId)
+    }
+
+    override suspend fun registerDevice(userId: String, email: String, deviceLabel: String): Result<Unit> {
+        return try {
+            val deviceId = deviceCredentialManager.getOrCreateDeviceId()
+            val publicKeyBase64 = deviceCredentialManager.generateDeviceKeyPair(userId)
+
+            val response = deviceAuthApi.registerDevice(
+                DeviceRegisterRequestDto(
+                    deviceId = deviceId,
+                    publicKey = publicKeyBase64,
+                    deviceLabel = deviceLabel
+                )
+            )
+
+            if (response.isSuccessful && response.body()?.registered == true) {
+                trustedDeviceDao.insertOrUpdate(
+                    TrustedDeviceEntity(
+                        userId = userId,
+                        email = email,
+                        deviceId = deviceId,
+                        keyAlias = "aura_device_key_$userId",
+                        deviceLabel = deviceLabel
+                    )
+                )
+                Result.success(Unit)
+            } else {
+                // Registration didn't take on the backend — don't leave an
+                // orphaned local key claiming this device is trusted.
+                deviceCredentialManager.deleteKey(userId)
+                Result.failure(Exception("Couldn't register this device. Please try again."))
+            }
+        } catch (e: Exception) {
+            deviceCredentialManager.deleteKey(userId)
+            Result.failure(Exception("Couldn't register this device. Please check your connection."))
+        }
+    }
+
+    override suspend fun forgetDevice(userId: String) {
+        deviceCredentialManager.deleteKey(userId)
+        trustedDeviceDao.deleteForUser(userId)
+    }
+
+    override suspend fun getLocalUserIdForEmail(email: String): String? =
+        trustedDeviceDao.getByEmail(email)?.takeIf { it.isActive }?.userId
+
+    override suspend fun getAllTrustedAccounts(): List<TrustedAccountSummary> =
+        trustedDeviceDao.getAll().map {
+            TrustedAccountSummary(userId = it.userId, email = it.email, deviceLabel = it.deviceLabel)
+        }
+
+    override suspend fun checkDeviceTrust(email: String): Result<DeviceTrustCheck> {
+        return try {
+            val deviceId = deviceCredentialManager.getOrCreateDeviceId()
+            val response = deviceAuthApi.requestChallenge(
+                DeviceChallengeRequestDto(email = email, deviceId = deviceId)
+            )
+            val body = response.body()
+            if (response.isSuccessful && body != null && body.deviceTrusted &&
+                body.challenge != null && body.deviceId != null
+            ) {
+                Result.success(DeviceTrustCheck.Trusted(body.deviceId, body.challenge))
+            } else {
+                Result.success(DeviceTrustCheck.NotTrusted)
+            }
+        } catch (e: Exception) {
+            Result.failure(Exception("Couldn't reach the server. Please check your connection."))
+        }
+    }
+
+    override suspend fun verifyDeviceAndResetPassword(
+        email: String,
+        deviceId: String,
+        challenge: String,
+        signatureBase64: String,
+        newPassword: String
+    ): Result<DeviceVerificationResult> {
+        return try {
+            val response = deviceAuthApi.verifyAndResetPassword(
+                DeviceVerifyResetRequestDto(
+                    email = email,
+                    deviceId = deviceId,
+                    challenge = challenge,
+                    signature = signatureBase64,
+                    newPassword = newPassword
+                )
+            )
+            val body = response.body()
+            if (response.isSuccessful && body?.success == true) {
+                Result.success(DeviceVerificationResult.Success(body.signInToken))
+            } else {
+                Result.success(
+                    DeviceVerificationResult.Failed(
+                        body?.message ?: "Device verification was unsuccessful. Please try again."
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Result.failure(Exception("Couldn't reach the server. Please check your connection."))
+        }
+    }
+
+    /**
+     * Signature-only login used by forgot-password once biometric succeeds:
+     * no password field, a valid signature just returns a sign-in token.
+     */
+    override suspend fun verifyDeviceAndLogin(
+        email: String,
+        deviceId: String,
+        challenge: String,
+        signatureBase64: String
+    ): Result<DeviceLoginResult> {
+        return try {
+            val response = deviceAuthApi.verifyAndLogin(
+                DeviceVerifyLoginRequestDto(
+                    email = email,
+                    deviceId = deviceId,
+                    challenge = challenge,
+                    signature = signatureBase64
+                )
+            )
+            val body = response.body()
+            if (response.isSuccessful && body?.success == true && body.signInToken != null) {
+                Result.success(DeviceLoginResult.Success(body.signInToken))
+            } else {
+                Result.success(
+                    DeviceLoginResult.Failed(
+                        body?.message ?: "Device verification was unsuccessful. Please try again."
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Result.failure(Exception("Couldn't reach the server. Please check your connection."))
+        }
+    }
+
+    override suspend fun sendFallbackResetEmail(email: String): Result<Unit> {
+        return try {
+            firebaseAuth.sendPasswordResetEmail(email).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(Exception(e.message ?: "Couldn't send the reset email. Please check the address and try again."))
+        }
     }
 }
 

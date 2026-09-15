@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.aura.launcher.AuraLauncherApp
 import com.aura.launcher.auth.AuthViewModel
+import com.aura.launcher.auth.DeviceAuthViewModel
 import com.aura.launcher.customization.explore.ExploreViewModel
 import com.aura.launcher.customization.setups.SavedSetupsViewModel
 import com.aura.launcher.launcher.appdrawer.AppDrawerViewModel
@@ -19,19 +20,20 @@ class ViewModelFactory(private val app: AuraLauncherApp) : ViewModelProvider.Fac
                 HomeViewModel(
                     app.manageHomeItemsUseCase,
                     app.getInstalledAppsUseCase,
-                    app.launchAppUseCase,
-                    app.appWidgetHostHelper
+                    app.launchAppUseCase
                 ) as T
             }
             modelClass.isAssignableFrom(AppDrawerViewModel::class.java) -> {
                 AppDrawerViewModel(
                     app.getInstalledAppsUseCase,
-                    app.launchAppUseCase,
-                    app.packageManagerHelper
+                    app.launchAppUseCase
                 ) as T
             }
             modelClass.isAssignableFrom(AuthViewModel::class.java) -> {
                 AuthViewModel(app.authUseCase) as T
+            }
+            modelClass.isAssignableFrom(DeviceAuthViewModel::class.java) -> {
+                DeviceAuthViewModel(app.deviceAuthUseCase, app.deviceCredentialManager) as T
             }
             modelClass.isAssignableFrom(SavedSetupsViewModel::class.java) -> {
                 SavedSetupsViewModel(
@@ -48,7 +50,9 @@ class ViewModelFactory(private val app: AuraLauncherApp) : ViewModelProvider.Fac
                     app.wallpaperRepository,
                     app.iconPackRepository,
                     app.themeRepository,
-                    app.savedSetupRepository
+                    app.savedSetupRepository,
+                    app.publicApi,
+                    app.remoteConfigApi
                 ) as T
             }
             else -> throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")

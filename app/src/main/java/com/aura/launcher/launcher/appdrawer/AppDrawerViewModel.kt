@@ -1,9 +1,7 @@
 package com.aura.launcher.launcher.appdrawer
 
-import android.content.pm.LauncherApps
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.aura.launcher.core.utils.PackageManagerHelper
 import com.aura.launcher.domain.model.AppInfo
 import com.aura.launcher.domain.usecase.GetInstalledAppsUseCase
 import com.aura.launcher.domain.usecase.LaunchAppUseCase
@@ -12,8 +10,7 @@ import kotlinx.coroutines.launch
 
 class AppDrawerViewModel(
     private val getInstalledAppsUseCase: GetInstalledAppsUseCase,
-    private val launchAppUseCase: LaunchAppUseCase,
-    private val packageManagerHelper: PackageManagerHelper
+    private val launchAppUseCase: LaunchAppUseCase
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
@@ -29,31 +26,10 @@ class AppDrawerViewModel(
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    private var appChangeCallback: LauncherApps.Callback? = null
-
     init {
         viewModelScope.launch {
             getInstalledAppsUseCase.refresh()
         }
-        appChangeCallback = packageManagerHelper.registerAppChangeCallback { packageName, changeType ->
-            viewModelScope.launch {
-                when (changeType) {
-                    com.aura.launcher.core.utils.ChangeType.ADDED, com.aura.launcher.core.utils.ChangeType.CHANGED -> {
-                        getInstalledAppsUseCase.refresh()
-                    }
-                    com.aura.launcher.core.utils.ChangeType.REMOVED -> {
-                        getInstalledAppsUseCase.refresh()
-                    }
-                }
-            }
-        }
-    }
-
-    override fun onCleared() {
-        appChangeCallback?.let {
-            packageManagerHelper.unregisterAppChangeCallback(it)
-        }
-        super.onCleared()
     }
 
     fun onSearchQueryChanged(query: String) {

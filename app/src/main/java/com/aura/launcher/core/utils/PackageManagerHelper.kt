@@ -4,120 +4,110 @@ import android.app.role.RoleManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.pm.LauncherActivityInfo
-import android.content.pm.LauncherApps
 import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
-import android.os.UserHandle
-import android.os.UserManager
 import android.provider.Settings
-import android.util.Log
 import com.aura.launcher.domain.model.AppInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import android.content.pm.LauncherApps
+import android.os.UserHandle
 
-/**
- * Upgraded PackageManagerHelper using LauncherApps API (Android 5.0+).
- *
- * Why LauncherApps instead of PackageManager.queryIntentActivities():
- * - LauncherApps is the official launcher API, designed specifically for home screen replacements
- * - It supports work profiles (managed users) out of the box
- * - It provides a Callback mechanism for real-time app install/remove/change events
- *   (replacing the old static BroadcastReceiver approach)
- * - It returns proper launcher-specific icons and labels
- */
 class PackageManagerHelper(private val context: Context) {
 
-    private val launcherApps: LauncherApps =
+        private val launcherApps: LauncherApps by lazy {
         context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
-
-    private val userManager: UserManager =
-        context.getSystemService(Context.USER_SERVICE) as UserManager
-
-    // ──────────────────────────────────────────────
-    // App Discovery via LauncherApps API
-    // ──────────────────────────────────────────────
-
-    /**
-     * Fetches all launchable apps using LauncherApps.getActivityList().
-     * This is the modern, recommended approach for launchers.
-     */
-    suspend fun getInstalledLaunchableApps(): List<AppInfo> = withContext(Dispatchers.IO) {
-        val result = mutableListOf<AppInfo>()
-        val ownPackage = context.packageName
-
-        for (userHandle in userManager.userProfiles) {
-            val activities: List<LauncherActivityInfo> = launcherApps.getActivityList(null, userHandle)
-
-            for (activityInfo in activities) {
-                val packageName = activityInfo.componentName.packageName
-                val activityName = activityInfo.componentName.className
-
-                // Exclude our own launcher from the app list
-                if (packageName == ownPackage) continue
-
-                val label = activityInfo.label?.toString() ?: packageName
-                val installTime = try {
-                    context.packageManager.getPackageInfo(packageName, 0).firstInstallTime
-                } catch (e: Exception) {
-                    0L
-                }
-
-                result.add(
-                    AppInfo(
-                        packageName = packageName,
-                        activityName = activityName,
-                        label = label,
-                        category = resolveCategory(activityInfo),
-                        isHidden = false,
-                        installTime = installTime
-                    )
-                )
-            }
-        }
-
-        result.sortedBy { it.label.lowercase() }
     }
 
-    // ──────────────────────────────────────────────
-    // App Icon Loading (Real System Icons)
-    // ──────────────────────────────────────────────
+    /** Registers a live callback for app install/uninstall/update events via LauncherApps. */
+    fun registerAppChangeCallback(onChange: (packageName: String, changeType: ChangeType) -> Unit): LauncherApps.Callback {
+        val callback = object : LauncherApps.Callback() {
+            override fun onPackageAdded(packageName: String, user: UserHandle) {
+                onChange(packageName, ChangeType.ADDED)
+            }
+            override fun onPackageRemoved(packageName: String, user: UserHandle) {
+                onChange(packageName, ChangeType.REMOVED)
+            }
+            override fun onPackageChanged(packageName: String, user: UserHandle) {
+                onChange(packageName, ChangeType.CHANGED)
+            }
+            override fun onPackagesAvailable(packageNames: Array<String>, user: UserHandle, replacing: Boolean) {
+                packageNames.forEach { onChange(it, ChangeType.CHANGED) }
+            }
+            override fun onPackagesUnavailable(packageNames: Array<String>, user: UserHandle, replacing: Boolean) {
+                packageNames.forEach { onChange(it, ChangeType.CHANGED) }
+            }
+        }
+        launcherApps.registerCallback(callback)
+        return callback
+    }
 
-    /**
-     * Returns the real app icon Drawable using LauncherApps API.
-     * Falls back to PackageManager if LauncherApps fails.
-     */
+    /** Unregisters a callback previously returned by registerAppChangeCallback. */
+    fun unregisterAppChangeCallback(callback: LauncherApps.Callback) {
+        launcherApps.unregisterCallback(callback)
+    }
+
+    suspend fun getInstalledLaunchableApps(): List<AppInfo> = withContext(Dispatchers.IO) {
+        val packageManager = context.packageManager
+        val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        }
+
+        val resolveInfos: List<ResolveInfo> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.queryIntentActivities(
+                mainIntent,
+                PackageManager.ResolveInfoFlags.of(0L)
+            )
+        } else {
+            packageManager.queryIntentActivities(mainIntent, 0)
+        }
+
+        resolveInfos.mapNotNull { resolveInfo ->
+            val activityInfo = resolveInfo.activityInfo ?: return@mapNotNull null
+            val packageName = activityInfo.packageName
+            val activityName = activityInfo.name
+
+            // Exclude our own launcher from app drawer
+            if (packageName == context.packageName) return@mapNotNull null
+
+            val label = resolveInfo.loadLabel(packageManager).toString()
+            val installTime = try {
+                packageManager.getPackageInfo(packageName, 0).firstInstallTime
+            } catch (e: Exception) {
+                0L
+            }
+
+            AppInfo(
+                packageName = packageName,
+                activityName = activityName,
+                label = label,
+                category = resolveCategory(resolveInfo),
+                isHidden = false,
+                installTime = installTime
+            )
+        }.sortedBy { it.label.lowercase() }
+    }
+
     fun getAppIconDrawable(packageName: String, activityName: String): Drawable? {
         return try {
             val component = ComponentName(packageName, activityName)
-            val userHandle = android.os.Process.myUserHandle()
-            val activityInfoList = launcherApps.getActivityList(packageName, userHandle)
-            val matchingActivity = activityInfoList.firstOrNull {
-                it.componentName == component
-            }
-            if (matchingActivity != null) {
-                // Get high-density icon from LauncherApps (respects adaptive icons)
-                matchingActivity.getIcon(context.resources.displayMetrics.densityDpi)
-            } else {
-                // Fallback: try PackageManager directly
-                context.packageManager.getActivityIcon(component)
-            }
+            context.packageManager.getActivityIcon(component)
         } catch (e: Exception) {
             try {
                 context.packageManager.getApplicationIcon(packageName)
             } catch (ex: Exception) {
-                Log.w("PackageManagerHelper", "Failed to load icon for $packageName", ex)
                 null
             }
         }
     }
 
     /**
-     * Converts a Drawable to a Bitmap for use with Compose Image.
+     * Converts a Drawable to a Bitmap for Compose Image rendering.
      */
     fun drawableToBitmap(drawable: Drawable): Bitmap {
         if (drawable is BitmapDrawable && drawable.bitmap != null) {
@@ -132,93 +122,46 @@ class PackageManagerHelper(private val context: Context) {
         return bitmap
     }
 
-    // ──────────────────────────────────────────────
-    // App Launching
-    // ──────────────────────────────────────────────
+    /**
+     * Expands the Android status bar / notification panel.
+     */
+    @Suppress("WrongConstant")
+    fun expandNotificationPanel() {
+        try {
+            val statusBarService = context.getSystemService("statusbar")
+            val statusBarClass = Class.forName("android.app.StatusBarManager")
+            val expandMethod = statusBarClass.getMethod("expandNotificationsPanel")
+            expandMethod.invoke(statusBarService)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
 
     fun launchApp(packageName: String, activityName: String? = null): Boolean {
         return try {
-            if (activityName != null) {
-                val component = ComponentName(packageName, activityName)
-                val userHandle = android.os.Process.myUserHandle()
-                // Use LauncherApps.startMainActivity for proper launcher behavior
-                launcherApps.startMainActivity(component, userHandle, null, null)
-                true
+            val intent = if (activityName != null) {
+                Intent(Intent.ACTION_MAIN).apply {
+                    addCategory(Intent.CATEGORY_LAUNCHER)
+                    component = ComponentName(packageName, activityName)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+                }
             } else {
-                val intent = context.packageManager.getLaunchIntentForPackage(packageName)?.apply {
+                context.packageManager.getLaunchIntentForPackage(packageName)?.apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 }
-                if (intent != null) {
-                    context.startActivity(intent)
-                    true
-                } else {
-                    false
-                }
+            }
+
+            if (intent != null) {
+                context.startActivity(intent)
+                true
+            } else {
+                false
             }
         } catch (e: Exception) {
-            Log.e("PackageManagerHelper", "Failed to launch $packageName", e)
+            e.printStackTrace()
             false
         }
     }
-
-    // ──────────────────────────────────────────────
-    // LauncherApps.Callback Registration
-    // ──────────────────────────────────────────────
-
-    /**
-     * Registers a LauncherApps.Callback for real-time app change detection.
-     * This replaces the static BroadcastReceiver pattern.
-     *
-     * @param onAppChanged Called when any app is added, removed, or changed.
-     *                     The String parameter is the package name.
-     */
-    fun registerAppChangeCallback(onAppChanged: (String, ChangeType) -> Unit): LauncherApps.Callback {
-        val callback = object : LauncherApps.Callback() {
-            override fun onPackageAdded(packageName: String, user: UserHandle) {
-                onAppChanged(packageName, ChangeType.ADDED)
-            }
-
-            override fun onPackageChanged(packageName: String, user: UserHandle) {
-                onAppChanged(packageName, ChangeType.CHANGED)
-            }
-
-            override fun onPackageRemoved(packageName: String, user: UserHandle) {
-                onAppChanged(packageName, ChangeType.REMOVED)
-            }
-
-            override fun onPackagesAvailable(
-                packageNames: Array<out String>,
-                user: UserHandle,
-                replacing: Boolean
-            ) {
-                packageNames.forEach { onAppChanged(it, ChangeType.ADDED) }
-            }
-
-            override fun onPackagesUnavailable(
-                packageNames: Array<out String>,
-                user: UserHandle,
-                replacing: Boolean
-            ) {
-                if (!replacing) {
-                    packageNames.forEach { onAppChanged(it, ChangeType.REMOVED) }
-                }
-            }
-        }
-
-        launcherApps.registerCallback(callback)
-        return callback
-    }
-
-    /**
-     * Unregisters a previously registered callback.
-     */
-    fun unregisterAppChangeCallback(callback: LauncherApps.Callback) {
-        launcherApps.unregisterCallback(callback)
-    }
-
-    // ──────────────────────────────────────────────
-    // Default Launcher Detection & Request
-    // ──────────────────────────────────────────────
 
     fun isDefaultLauncher(): Boolean {
         val intent = Intent(Intent.ACTION_MAIN).apply {
@@ -258,50 +201,9 @@ class PackageManagerHelper(private val context: Context) {
         }
     }
 
-    /**
-     * Expand the system status bar (notification panel).
-     * Uses reflection on StatusBarManager for compatibility.
-     */
-    @Suppress("WrongConstant")
-    fun expandNotificationPanel() {
-        try {
-            val statusBarService = context.getSystemService("statusbar")
-            val statusBarClass = Class.forName("android.app.StatusBarManager")
-            val expandMethod = statusBarClass.getMethod("expandNotificationsPanel")
-            expandMethod.invoke(statusBarService)
-        } catch (e: Exception) {
-            Log.w("PackageManagerHelper", "Cannot expand notification panel", e)
-        }
-    }
-
-    // ──────────────────────────────────────────────
-    // Helpers
-    // ──────────────────────────────────────────────
-
-    private fun resolveCategory(activityInfo: LauncherActivityInfo): String {
-        return try {
-            val appInfo = activityInfo.applicationInfo
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                when (appInfo.category) {
-                    android.content.pm.ApplicationInfo.CATEGORY_GAME -> "Games"
-                    android.content.pm.ApplicationInfo.CATEGORY_AUDIO -> "Media"
-                    android.content.pm.ApplicationInfo.CATEGORY_VIDEO -> "Media"
-                    android.content.pm.ApplicationInfo.CATEGORY_IMAGE -> "Media"
-                    android.content.pm.ApplicationInfo.CATEGORY_SOCIAL -> "Social"
-                    android.content.pm.ApplicationInfo.CATEGORY_NEWS -> "News"
-                    android.content.pm.ApplicationInfo.CATEGORY_MAPS -> "Tools"
-                    android.content.pm.ApplicationInfo.CATEGORY_PRODUCTIVITY -> "Productivity"
-                    else -> "Apps"
-                }
-            } else {
-                "Apps"
-            }
-        } catch (e: Exception) {
-            "Apps"
-        }
+    private fun resolveCategory(resolveInfo: ResolveInfo): String {
+        return "Apps"
     }
 }
 
-enum class ChangeType {
-    ADDED, REMOVED, CHANGED
-}
+      enum class ChangeType { ADDED, REMOVED, CHANGED }

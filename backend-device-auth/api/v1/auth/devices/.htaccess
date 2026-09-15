@@ -1,0 +1,17 @@
+# The Android app calls these endpoints WITHOUT a .php extension — e.g.
+# POST https://aura-launcher.unaux.com/api/v1/auth/devices/register
+# (see Apis.kt: @POST("auth/devices/register"), same style as the existing
+# @GET("auth/me")). This rule makes that resolve to register.php etc.
+#
+# If your server already serves /api/v1/auth/me (no .php) successfully,
+# you very likely already have this same mechanism active for the whole
+# api/v1/ tree (either Apache's MultiViews, or a front-controller router) —
+# in that case this file is redundant and harmless to leave in place, or
+# you can delete it. If /auth/me only works WITH a .php extension today, or
+# your backend uses a single index.php router instead of standalone files,
+# tell me which — this endpoint set can be adjusted to match either way.
+
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME}.php -f
+RewriteRule ^(.*)$ $1.php [L,QSA]

@@ -6,6 +6,11 @@ import androidx.lifecycle.viewModelScope
 import com.aura.launcher.core.network.NetworkResult
 import com.aura.launcher.customization.vibesync.ExtractedVibePalette
 import com.aura.launcher.customization.vibesync.VibeSyncEngine
+import com.aura.launcher.data.remote.api.PublicApi
+import com.aura.launcher.data.remote.api.RemoteConfigApi
+import com.aura.launcher.data.remote.dto.CategoryDto
+import com.aura.launcher.data.remote.dto.PublicHomeDto
+import com.aura.launcher.data.remote.dto.PublicWidgetDto
 import com.aura.launcher.domain.model.*
 import com.aura.launcher.domain.repository.*
 import kotlinx.coroutines.Dispatchers
@@ -25,7 +30,9 @@ class ExploreViewModel(
     private val wallpaperRepository: WallpaperRepository,
     private val iconPackRepository: IconPackRepository,
     private val themeRepository: ThemeRepository,
-    private val savedSetupRepository: SavedSetupRepository
+    private val savedSetupRepository: SavedSetupRepository,
+    private val publicApi: PublicApi? = null,
+    private val remoteConfigApi: RemoteConfigApi? = null
 ) : ViewModel() {
 
     private val _selectedTab = MutableStateFlow(ExploreTab.WALLPAPERS)
@@ -39,6 +46,15 @@ class ExploreViewModel(
 
     private val _themes = MutableStateFlow<List<RemoteTheme>>(emptyList())
     val themes: StateFlow<List<RemoteTheme>> = _themes.asStateFlow()
+
+    private val _publicCategories = MutableStateFlow<List<CategoryDto>>(emptyList())
+    val publicCategories: StateFlow<List<CategoryDto>> = _publicCategories.asStateFlow()
+
+    private val _publicWidgets = MutableStateFlow<List<PublicWidgetDto>>(emptyList())
+    val publicWidgets: StateFlow<List<PublicWidgetDto>> = _publicWidgets.asStateFlow()
+
+    private val _featuredIds = MutableStateFlow<List<String>>(emptyList())
+    val featuredIds: StateFlow<List<String>> = _featuredIds.asStateFlow()
 
     private val _extractedPalette = MutableStateFlow<ExtractedVibePalette?>(null)
     val extractedPalette: StateFlow<ExtractedVibePalette?> = _extractedPalette.asStateFlow()
@@ -69,6 +85,31 @@ class ExploreViewModel(
                 is NetworkResult.Success -> _themes.value = themeResult.data
                 else -> {}
             }
+
+            // Fetch live public data from admin panel
+            try {
+                publicApi?.let { api ->
+                    val homeResp = api.getPublicHome()
+                    if (homeResp.isSuccessful && homeResp.body() != null) {
+                        val body = homeResp.body()!!
+                        body.featured?.let { _featuredIds.value = it }
+                        body.categories?.let { _publicCategories.value = it }
+                    }
+
+                    val widgetResp = api.getPublicWidgets()
+                    if (widgetResp.isSuccessful && widgetResp.body() != null) {
+                        _publicWidgets.value = widgetResp.body()!!
+                    }
+
+                    val catResp = api.getPublicCategories()
+                    if (catResp.isSuccessful && catResp.body() != null) {
+                        _publicCategories.value = catResp.body()!!
+                    }
+                }
+            } catch (e: Exception) {
+                // Silently fallback if server is unreachable
+            }
+
             _isLoading.value = false
         }
     }

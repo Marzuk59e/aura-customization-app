@@ -1,0 +1,11 @@
+{
+    "name": "aura-launcher/device-auth-backend",
+    "description": "Device-bound password-reset verification endpoints for Aura Launcher",
+    "require": {
+        "php": ">=8.0",
+        "kreait/firebase-php": "^7.0"
+    },
+    "config": {
+        "optimize-autoloader": true
+    }
+}

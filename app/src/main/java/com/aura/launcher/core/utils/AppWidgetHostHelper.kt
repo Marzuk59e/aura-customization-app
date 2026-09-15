@@ -6,7 +6,7 @@ import android.appwidget.AppWidgetProviderInfo
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.widget.AppWidgetHostView
+import android.appwidget.AppWidgetHostView
 import com.aura.launcher.customization.widgets.AuraWidgetInfo
 import com.aura.launcher.customization.widgets.WidgetType
 import kotlinx.coroutines.Dispatchers

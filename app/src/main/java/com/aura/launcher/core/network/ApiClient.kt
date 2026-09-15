@@ -8,7 +8,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 
 object ApiClient {
-    private const val DEFAULT_BASE_URL = "https://api.aura.app/api/v1/"
+    private const val DEFAULT_BASE_URL = "https://aura-launcher.unaux.com/api/v1/"
 
     fun createRetrofit(
         authPreferences: AuthPreferences,

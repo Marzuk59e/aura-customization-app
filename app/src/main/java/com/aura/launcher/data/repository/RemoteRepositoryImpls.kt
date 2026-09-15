@@ -11,12 +11,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.URL
 
+import com.aura.launcher.data.local.dao.CachedContentDao
+import com.aura.launcher.data.local.entities.CachedIconPackEntity
+import com.aura.launcher.data.local.entities.CachedThemeEntity
+import com.aura.launcher.data.local.entities.CachedWallpaperEntity
+
 class WallpaperRepositoryImpl(
     private val context: Context,
-    private val wallpaperApi: WallpaperApi
+    private val wallpaperApi: WallpaperApi,
+    private val cachedContentDao: CachedContentDao? = null
 ) : WallpaperRepository {
 
-    // Built-in seed data for offline / fallback
+    // Built-in seed data for initial cold-start fallback
     private val defaultWallpapers = listOf(
         RemoteWallpaper(
             id = "wp-1",
@@ -67,12 +73,45 @@ class WallpaperRepositoryImpl(
                         downloads = dto.downloads
                     )
                 }
-                NetworkResult.Success(if (list.isNotEmpty()) list else defaultWallpapers)
+                if (list.isNotEmpty()) {
+                    cachedContentDao?.insertCachedWallpapers(list.map {
+                        CachedWallpaperEntity(
+                            id = it.id,
+                            title = it.title,
+                            imageUrl = it.imageUrl,
+                            thumbnailUrl = it.thumbnailUrl,
+                            category = it.category,
+                            tier = it.tier,
+                            downloads = it.downloads
+                        )
+                    })
+                    NetworkResult.Success(list)
+                } else {
+                    fallbackToCache()
+                }
             } else {
-                NetworkResult.Success(defaultWallpapers)
+                fallbackToCache()
             }
         } catch (e: Exception) {
-            // Graceful fallback to offline seed data
+            fallbackToCache()
+        }
+    }
+
+    private suspend fun fallbackToCache(): NetworkResult<List<RemoteWallpaper>> {
+        val cached = cachedContentDao?.getAllCachedWallpapers()
+        return if (!cached.isNullOrEmpty()) {
+            NetworkResult.Success(cached.map {
+                RemoteWallpaper(
+                    id = it.id,
+                    title = it.title,
+                    imageUrl = it.imageUrl,
+                    thumbnailUrl = it.thumbnailUrl,
+                    category = it.category,
+                    tier = it.tier,
+                    downloads = it.downloads
+                )
+            })
+        } else {
             NetworkResult.Success(defaultWallpapers)
         }
     }
@@ -82,7 +121,29 @@ class WallpaperRepositoryImpl(
         return if (found != null) NetworkResult.Success(found) else NetworkResult.Error(404, "Wallpaper not found")
     }
     
-        override suspend fun applyWallpaperBitmap(bitmap: android.graphics.Bitmap): Boolean = withContext(Dispatchers.IO) {
+        /**
+     * Safety guard: while Aura isn't the phone's actual Home app, none of
+     * its customization actions should touch the real device — not even
+     * the wallpaper. Only true once the user has explicitly granted the
+     * Home role (see PackageManagerHelper.openDefaultLauncherSettings()).
+     */
+    private fun isDefaultLauncher(): Boolean {
+        val intent = android.content.Intent(android.content.Intent.ACTION_MAIN).apply {
+            addCategory(android.content.Intent.CATEGORY_HOME)
+        }
+        val resolveInfo = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            context.packageManager.resolveActivity(
+                intent,
+                android.content.pm.PackageManager.ResolveInfoFlags.of(android.content.pm.PackageManager.MATCH_DEFAULT_ONLY.toLong())
+            )
+        } else {
+            context.packageManager.resolveActivity(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+        }
+        return resolveInfo?.activityInfo?.packageName == context.packageName
+    }
+
+    override suspend fun applyWallpaperBitmap(bitmap: android.graphics.Bitmap): Boolean = withContext(Dispatchers.IO) {
+        if (!isDefaultLauncher()) return@withContext false
         try {
             WallpaperManager.getInstance(context).setBitmap(bitmap)
             true
@@ -93,7 +154,8 @@ class WallpaperRepositoryImpl(
     }
 
     override suspend fun applyWallpaper(imageUrl: String): Boolean = withContext(Dispatchers.IO) { 
-         try {
+        if (!isDefaultLauncher()) return@withContext false
+        try {
             val wallpaperManager = WallpaperManager.getInstance(context)
             val url = URL(imageUrl)
             val bitmap = BitmapFactory.decodeStream(url.openConnection().getInputStream())
@@ -111,7 +173,8 @@ class WallpaperRepositoryImpl(
 }
 
 class IconPackRepositoryImpl(
-    private val iconPackApi: IconPackApi
+    private val iconPackApi: IconPackApi,
+    private val cachedContentDao: CachedContentDao? = null
 ) : IconPackRepository {
 
     private val defaultIconPacks = listOf(
@@ -156,11 +219,45 @@ class IconPackRepositoryImpl(
                         author = dto.author
                     )
                 }
-                NetworkResult.Success(if (list.isNotEmpty()) list else defaultIconPacks)
+                if (list.isNotEmpty()) {
+                    cachedContentDao?.insertCachedIconPacks(list.map {
+                        CachedIconPackEntity(
+                            id = it.id,
+                            name = it.name,
+                            description = it.description,
+                            iconCount = it.iconCount,
+                            previewUrl = it.previewUrl,
+                            tier = it.tier,
+                            author = it.author
+                        )
+                    })
+                    NetworkResult.Success(list)
+                } else {
+                    fallbackToCache()
+                }
             } else {
-                NetworkResult.Success(defaultIconPacks)
+                fallbackToCache()
             }
         } catch (e: Exception) {
+            fallbackToCache()
+        }
+    }
+
+    private suspend fun fallbackToCache(): NetworkResult<List<RemoteIconPack>> {
+        val cached = cachedContentDao?.getAllCachedIconPacks()
+        return if (!cached.isNullOrEmpty()) {
+            NetworkResult.Success(cached.map {
+                RemoteIconPack(
+                    id = it.id,
+                    name = it.name,
+                    description = it.description,
+                    iconCount = it.iconCount,
+                    previewUrl = it.previewUrl,
+                    tier = it.tier,
+                    author = it.author
+                )
+            })
+        } else {
             NetworkResult.Success(defaultIconPacks)
         }
     }
@@ -172,7 +269,8 @@ class IconPackRepositoryImpl(
 }
 
 class ThemeRepositoryImpl(
-    private val themeApi: ThemeApi
+    private val themeApi: ThemeApi,
+    private val cachedContentDao: CachedContentDao? = null
 ) : ThemeRepository {
 
     private val defaultThemes = listOf(
@@ -217,11 +315,45 @@ class ThemeRepositoryImpl(
                         tier = dto.tier
                     )
                 }
-                NetworkResult.Success(if (list.isNotEmpty()) list else defaultThemes)
+                if (list.isNotEmpty()) {
+                    cachedContentDao?.insertCachedThemes(list.map {
+                        CachedThemeEntity(
+                            id = it.id,
+                            name = it.name,
+                            description = it.description,
+                            primaryColor = it.primaryColor,
+                            secondaryColor = it.secondaryColor,
+                            previewUrl = it.previewUrl,
+                            tier = it.tier
+                        )
+                    })
+                    NetworkResult.Success(list)
+                } else {
+                    fallbackToCache()
+                }
             } else {
-                NetworkResult.Success(defaultThemes)
+                fallbackToCache()
             }
         } catch (e: Exception) {
+            fallbackToCache()
+        }
+    }
+
+    private suspend fun fallbackToCache(): NetworkResult<List<RemoteTheme>> {
+        val cached = cachedContentDao?.getAllCachedThemes()
+        return if (!cached.isNullOrEmpty()) {
+            NetworkResult.Success(cached.map {
+                RemoteTheme(
+                    id = it.id,
+                    name = it.name,
+                    description = it.description,
+                    primaryColor = it.primaryColor,
+                    secondaryColor = it.secondaryColor,
+                    previewUrl = it.previewUrl,
+                    tier = it.tier
+                )
+            })
+        } else {
             NetworkResult.Success(defaultThemes)
         }
     }
@@ -231,3 +363,4 @@ class ThemeRepositoryImpl(
         return if (found != null) NetworkResult.Success(found) else NetworkResult.Error(404, "Theme not found")
     }
 }
+

@@ -14,9 +14,13 @@ import com.aura.launcher.data.local.entities.*
         FolderEntity::class,
         UserEntity::class,
         SavedSetupEntity::class,
-        FavoriteEntity::class
+        FavoriteEntity::class,
+        CachedWallpaperEntity::class,
+        CachedIconPackEntity::class,
+        CachedThemeEntity::class,
+        TrustedDeviceEntity::class
     ],
-    version = 1,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -26,6 +30,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun userDao(): UserDao
     abstract fun savedSetupDao(): SavedSetupDao
     abstract fun favoriteDao(): FavoriteDao
+    abstract fun cachedContentDao(): CachedContentDao
+    abstract fun trustedDeviceDao(): TrustedDeviceDao
 
     companion object {
         @Volatile

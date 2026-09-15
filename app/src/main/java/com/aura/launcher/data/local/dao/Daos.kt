@@ -98,6 +98,36 @@ interface UserDao {
 }
 
 @Dao
+interface TrustedDeviceDao {
+    @Query("SELECT * FROM trusted_devices WHERE userId = :userId LIMIT 1")
+    suspend fun getForUser(userId: String): TrustedDeviceEntity?
+
+    @Query("SELECT * FROM trusted_devices WHERE email = :email LIMIT 1")
+    suspend fun getByEmail(email: String): TrustedDeviceEntity?
+
+    /**
+     * Every active account with a device key on this install — used by
+     * forgot-password to skip asking for an email entirely. Zero rows means
+     * fall straight to the email-code fallback; one row is used
+     * automatically; more than one shows a small account picker.
+     */
+    @Query("SELECT * FROM trusted_devices WHERE isActive = 1")
+    suspend fun getAll(): List<TrustedDeviceEntity>
+
+    @Query("SELECT * FROM trusted_devices WHERE userId = :userId LIMIT 1")
+    fun getForUserFlow(userId: String): Flow<TrustedDeviceEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdate(entity: TrustedDeviceEntity)
+
+    @Query("DELETE FROM trusted_devices WHERE userId = :userId")
+    suspend fun deleteForUser(userId: String)
+
+    @Query("UPDATE trusted_devices SET isActive = :isActive WHERE userId = :userId")
+    suspend fun setActive(userId: String, isActive: Boolean)
+}
+
+@Dao
 interface SavedSetupDao {
     @Query("SELECT * FROM saved_setups WHERE userId = :userId ORDER BY createdAt DESC")
     fun getSetupsForUser(userId: String): Flow<List<SavedSetupEntity>>
@@ -129,3 +159,28 @@ interface FavoriteDao {
     @Query("DELETE FROM favorites WHERE userId = :userId AND targetId = :targetId AND type = :type")
     suspend fun removeFavorite(userId: String, targetId: String, type: String)
 }
+
+@Dao
+interface CachedContentDao {
+    // Wallpapers
+    @Query("SELECT * FROM cached_wallpapers ORDER BY downloads DESC")
+    suspend fun getAllCachedWallpapers(): List<CachedWallpaperEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCachedWallpapers(items: List<CachedWallpaperEntity>)
+
+    // Icon Packs
+    @Query("SELECT * FROM cached_icon_packs")
+    suspend fun getAllCachedIconPacks(): List<CachedIconPackEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCachedIconPacks(items: List<CachedIconPackEntity>)
+
+    // Themes
+    @Query("SELECT * FROM cached_themes")
+    suspend fun getAllCachedThemes(): List<CachedThemeEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCachedThemes(items: List<CachedThemeEntity>)
+}
+

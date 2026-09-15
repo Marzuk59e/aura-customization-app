@@ -1,6 +1,5 @@
 package com.aura.launcher.launcher.home
 
-import android.content.ComponentName
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
@@ -39,7 +38,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import com.aura.launcher.core.theme.*
 import com.aura.launcher.customization.icons.IconPackPickerSheet
 import com.aura.launcher.customization.vibesync.VibeSyncDialog
@@ -51,6 +49,9 @@ import com.aura.launcher.customization.widgets.components.DigitalClockNeonWidget
 import com.aura.launcher.customization.widgets.components.WeatherCardWidget
 import com.aura.launcher.domain.model.HomeItem
 import com.aura.launcher.domain.model.HomeItemType
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import java.text.SimpleDateFormat
 import java.util.*
 import androidx.compose.ui.draw.drawBehind
@@ -64,7 +65,8 @@ fun HomeScreen(
     onOpenWallpaper: () -> Unit,
     onOpenSavedSetups: () -> Unit,
     onOpenProfile: () -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    isLoggedIn: Boolean = false
 ) {
     val homeItems by homeViewModel.page0Items.collectAsState()
     val allHomeItems by homeViewModel.allHomeItems.collectAsState()
@@ -73,6 +75,7 @@ fun HomeScreen(
     val iconShape by homeViewModel.activeIconShape.collectAsState()
     val iconPack by homeViewModel.activeIconPack.collectAsState()
     val vibePalette by homeViewModel.vibePalette.collectAsState()
+    val activeFolder by homeViewModel.activeFolder.collectAsState()
     val context = LocalContext.current
     val pagerState = rememberPagerState(pageCount = { pageCount })
 
@@ -84,6 +87,9 @@ fun HomeScreen(
     var showIconPicker by remember { mutableStateOf(false) }
     var showVibeSyncDialog by remember { mutableStateOf(false) }
     var isEditMode by remember { mutableStateOf(false) }
+    var draggedItemId by remember { mutableStateOf<Long?>(null) }
+    var dragOffset by remember { mutableStateOf(Offset.Zero) }
+    val itemBounds = remember { mutableStateMapOf<Long, Rect>() }
 
     Box(modifier = Modifier.fillMaxSize()) {
         // Ambient gradient overlay — matches css .launcher-ambient-overlay
@@ -101,6 +107,8 @@ fun HomeScreen(
                 )
         )
 
+        val appInstance = remember(context) { context.applicationContext as? com.aura.launcher.AuraLauncherApp ?: com.aura.launcher.AuraLauncherApp.instance }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -108,6 +116,8 @@ fun HomeScreen(
                     detectVerticalDragGestures { _, dragAmount ->
                         if (dragAmount < -30) {
                             onOpenAppDrawer()
+                        } else if (dragAmount > 35) {
+                            appInstance.packageManagerHelper.expandNotificationPanel()
                         }
                     }
                 }
@@ -162,6 +172,30 @@ fun HomeScreen(
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    // Vibe Sync quick-access — opens the existing VibeSyncDialog (was previously unreachable,
+                    // no button on the real Home dashboard triggered it). Mirrors the web prototype's
+                    // "hero banner shortcut" that jumps straight into a one-tap photo-to-palette sync.
+                    IconButton(
+                        onClick = { showVibeSyncDialog = true },
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(vibePalette.vibrant.copy(alpha = 0.16f))
+                            .size(34.dp)
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = "Vibe Sync", tint = vibePalette.vibrant, modifier = Modifier.size(16.dp))
+                    }
+
+                    // Profile icon — placeholder integration point, only visible for logged-in (non-guest) users.
+                    // Final placement/design to be revisited once the dashboard UI is finalized.
+                    if (isLoggedIn) {
+                        IconButton(
+                            onClick = onOpenProfile,
+                            modifier = Modifier.clip(CircleShape).background(DarkSurfaceGlass).size(34.dp)
+                        ) {
+                            Icon(Icons.Default.AccountCircle, contentDescription = "Profile", tint = TextSecondary, modifier = Modifier.size(18.dp))
+                        }
+                    }
+
                     // Settings (kept accessible, not in original web mock but needed for app functionality)
                     IconButton(
                         onClick = onOpenSettings,
@@ -209,7 +243,7 @@ fun HomeScreen(
                     // Default Top Clock Widget — only on the first page
                     if (page == 0) {
                         item(span = { GridItemSpan(4) }) {
-                            DigitalClockNeonWidget(accentColor = vibePalette.vibrant)
+                            DigitalClockNeonWidget(accentColor = vibePalette.vibrant, modifier = Modifier.animateItem())
                         }
                     }
 
@@ -218,26 +252,68 @@ fun HomeScreen(
                         if (item.itemType == HomeItemType.WIDGET) GridItemSpan(item.spanX) else GridItemSpan(1)
                     }) { item ->
                         if (item.itemType == HomeItemType.WIDGET) {
-                            if (item.widgetId != null && item.widgetProvider != null) {
-                                RealWidgetHost(
+                            if (item.widgetId != null) {
+                                com.aura.launcher.launcher.widget.AndroidAppWidgetHostView(
                                     appWidgetId = item.widgetId,
-                                    provider = ComponentName.unflattenFromString(item.widgetProvider),
-                                    appWidgetHostHelper = homeViewModel.appWidgetHostHelper
+                                    host = appInstance.appWidgetHost,
+                                    modifier = Modifier.animateItem().fillMaxWidth().height(120.dp)
                                 )
                             } else {
                                 when (item.widgetProvider) {
-                                    WidgetType.ANALOG_CLOCK.name -> AnalogClockWidget(accentColor = vibePalette.vibrant)
-                                    WidgetType.BATTERY_GAUGE.name -> BatteryGaugeWidget()
-                                    WidgetType.WEATHER_CARD.name -> WeatherCardWidget()
-                                    else -> DigitalClockNeonWidget(accentColor = vibePalette.vibrant)
+                                    WidgetType.ANALOG_CLOCK.name -> AnalogClockWidget(accentColor = vibePalette.vibrant, modifier = Modifier.animateItem())
+                                    WidgetType.BATTERY_GAUGE.name -> BatteryGaugeWidget(modifier = Modifier.animateItem())
+                                    WidgetType.WEATHER_CARD.name -> WeatherCardWidget(modifier = Modifier.animateItem())
+                                    else -> DigitalClockNeonWidget(accentColor = vibePalette.vibrant, modifier = Modifier.animateItem())
                                 }
                             }
                         } else {
                             HomeGridItem(
                                 item = item,
+                                modifier = if (draggedItemId == item.id) Modifier else Modifier.animateItem(),
                                 iconShape = iconShape,
                                 accentColor = vibePalette.lightVibrant,
-                                onClick = { homeViewModel.launchHomeItem(item) }
+                                isEditMode = isEditMode,
+                                isDragging = draggedItemId == item.id,
+                                dragOffset = if (draggedItemId == item.id) dragOffset else Offset.Zero,
+                                onPositioned = { bounds -> itemBounds[item.id] = bounds },
+                                onDragStart = {
+                                    draggedItemId = item.id
+                                    dragOffset = Offset.Zero
+                                },
+                                onDrag = { amount ->
+                                    dragOffset += amount
+                                    val draggedBounds = itemBounds[item.id]
+                                    if (draggedBounds != null) {
+                                        val currentCenter = draggedBounds.center + dragOffset
+                                        val targetId = itemBounds.entries.firstOrNull { (id, bounds) ->
+                                            id != item.id && bounds.contains(currentCenter)
+                                        }?.key
+                                        val targetItem = targetId?.let { id -> pageItems.firstOrNull { it.id == id } }
+                                        if (targetItem != null && targetItem.itemType != HomeItemType.WIDGET) {
+                                            homeViewModel.moveHomeItem(item.id, page, targetItem.cellX, targetItem.cellY)
+                                            homeViewModel.moveHomeItem(targetItem.id, page, item.cellX, item.cellY)
+                                            dragOffset = Offset.Zero
+                                        }
+                                    }
+                                },
+                                onDragEnd = {
+                                    draggedItemId = null
+                                    dragOffset = Offset.Zero
+                                },
+                                onDelete = {
+                                    homeViewModel.removeHomeItem(item)
+                                    Toast.makeText(context, "${item.label ?: "Item"} removed", Toast.LENGTH_SHORT).show()
+                                },
+                                onClick = {
+                                    if (!isEditMode) {
+                                        homeViewModel.launchHomeItem(item)
+                                    }
+                                    // In edit mode, tapping the tile itself does nothing — deleting
+                                    // is a deliberate action via the small "X" badge only (see
+                                    // onDelete below). It previously deleted on any tap here too,
+                                    // which meant a single accidental tap while trying to drag an
+                                    // icon (or a folder!) would permanently remove it.
+                                }
                             )
                         }
                     }
@@ -313,7 +389,18 @@ fun HomeScreen(
             EditModeToolbar(
                 onAddWidget = { showWidgetPicker = true },
                 onAddFolder = {
-                    Toast.makeText(context, "Folder creation is coming soon", Toast.LENGTH_SHORT).show()
+                    val pageItems = allHomeItems.filter { it.pageIndex == pagerState.currentPage && it.itemType == HomeItemType.APP }
+                    if (pageItems.size >= 2) {
+                        homeViewModel.createFolderWithItems(
+                            title = "New Folder",
+                            item1 = pageItems[0],
+                            item2 = pageItems[1],
+                            pageIndex = pagerState.currentPage
+                        )
+                        Toast.makeText(context, "Folder created!", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "Need at least 2 apps on this page to create a folder", Toast.LENGTH_SHORT).show()
+                    }
                 },
                 onOpenWallpaper = {
                     isEditMode = false
@@ -326,7 +413,6 @@ fun HomeScreen(
         // Modals & Bottom Sheets
         if (showWidgetPicker) {
             WidgetPickerSheet(
-                appWidgetHostHelper = homeViewModel.appWidgetHostHelper,
                 onDismiss = { showWidgetPicker = false },
                 onSelectWidget = { homeViewModel.addWidgetToHome(it, pagerState.currentPage) }
             )
@@ -349,8 +435,31 @@ fun HomeScreen(
                 onApplyPalette = { homeViewModel.applyVibePalette(it) }
             )
         }
+
+        activeFolder?.let { folder ->
+            com.aura.launcher.launcher.folder.FolderDialog(
+                folder = folder,
+                iconShape = iconShape,
+                onDismiss = { homeViewModel.closeFolder() },
+                onLaunchApp = { appInfo ->
+                    homeViewModel.launchHomeItem(
+                        HomeItem(
+                            pageIndex = 0,
+                            cellX = 0,
+                            cellY = 0,
+                            packageName = appInfo.packageName,
+                            activityName = appInfo.activityName,
+                            label = appInfo.label
+                        )
+                    )
+                },
+                onRenameFolder = { newTitle ->
+                    homeViewModel.renameFolder(folder.id, newTitle)
+                }
+            )
+        }
     }
-    }
+}
 }
 
 // Matches css .launcher-edit-toolbar / .edit-toolbar-title / .edit-actions-row / .edit-btn
@@ -404,23 +513,5 @@ private fun EditToolbarButton(
     ) {
         Icon(icon, contentDescription = label, tint = Color.White, modifier = Modifier.size(15.dp))
         Text(label, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-private fun RealWidgetHost(
-    appWidgetId: Int,
-    provider: ComponentName?,
-    appWidgetHostHelper: com.aura.launcher.core.utils.AppWidgetHostHelper
-) {
-    if (provider == null) return
-    val hostView = remember(appWidgetId) {
-        appWidgetHostHelper.createHostView(appWidgetId, provider)
-    }
-    if (hostView != null) {
-        AndroidView(
-            factory = { hostView },
-            modifier = Modifier.fillMaxWidth()
-        )
     }
 }

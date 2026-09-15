@@ -1,5 +1,7 @@
 package com.aura.launcher.launcher.folder
 
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -16,6 +18,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import com.aura.launcher.core.utils.rememberAppIconBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -126,46 +130,69 @@ fun FolderDialog(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         items(folder.apps, key = { it.componentKey }) { app ->
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .clickable {
-                                        onLaunchApp(app)
-                                        onDismiss()
-                                    }
-                                    .padding(6.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(52.dp)
-                                        .clip(getShapeForIcon(iconShape))
-                                        .background(DarkSurfaceVariant),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = app.label.take(1).uppercase(),
-                                        color = AuraCyan,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 20.sp
-                                    )
+                            FolderAppItem(
+                                app = app,
+                                iconShape = iconShape,
+                                onClick = {
+                                    onLaunchApp(app)
+                                    onDismiss()
                                 }
-
-                                Spacer(modifier = Modifier.height(6.dp))
-
-                                Text(
-                                    text = app.label,
-                                    color = TextPrimary,
-                                    fontSize = 11.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
+                            )
                         }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+fun FolderAppItem(
+    app: AppInfo,
+    iconShape: IconShape,
+    onClick: () -> Unit
+) {
+    val iconBitmap = rememberAppIconBitmap(app.packageName, app.activityName)
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(6.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .clip(getShapeForIcon(iconShape))
+                .background(DarkSurfaceVariant),
+            contentAlignment = Alignment.Center
+        ) {
+            if (iconBitmap != null) {
+                Image(
+                    bitmap = iconBitmap.asImageBitmap(),
+                    contentDescription = app.label,
+                    modifier = Modifier.size(42.dp)
+                )
+            } else {
+                Text(
+                    text = app.label.take(1).uppercase(),
+                    color = AuraCyan,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = app.label,
+            color = TextPrimary,
+            fontSize = 11.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
+        )
     }
 }

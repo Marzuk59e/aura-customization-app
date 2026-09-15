@@ -1,5 +1,6 @@
 package com.aura.launcher.auth
 
+import android.util.Patterns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aura.launcher.domain.model.User
@@ -36,6 +37,10 @@ class AuthViewModel(
             _uiState.value = AuthUiState.Error("Please fill in all fields")
             return
         }
+        if (!isValidEmail(email.trim())) {
+            _uiState.value = AuthUiState.Error("Please enter a valid email address")
+            return
+        }
         viewModelScope.launch {
             _uiState.value = AuthUiState.Loading
             val result = authUseCase.login(email.trim(), password)
@@ -47,9 +52,21 @@ class AuthViewModel(
         }
     }
 
-    fun signUp(email: String, name: String, password: String) {
-        if (email.isBlank() || name.isBlank() || password.isBlank()) {
+    fun signUp(email: String, name: String, password: String, confirmPassword: String) {
+        if (email.isBlank() || name.isBlank() || password.isBlank() || confirmPassword.isBlank()) {
             _uiState.value = AuthUiState.Error("Please fill in all fields")
+            return
+        }
+        if (!isValidEmail(email.trim())) {
+            _uiState.value = AuthUiState.Error("Please enter a valid email address")
+            return
+        }
+        if (password.length < 6) {
+            _uiState.value = AuthUiState.Error("Password must be at least 6 characters")
+            return
+        }
+        if (password != confirmPassword) {
+            _uiState.value = AuthUiState.Error("Passwords do not match")
             return
         }
         viewModelScope.launch {
@@ -71,6 +88,24 @@ class AuthViewModel(
         }
     }
 
+    /**
+     * Finishes the forgot-password biometric flow: the device already
+     * proved its signature to the backend (see DeviceAuthViewModel /
+     * verify-login.php) and got a Firebase custom token back — this just
+     * turns that into a normal signed-in session, same as [login] would.
+     */
+    fun completeDeviceSignIn(signInToken: String) {
+        viewModelScope.launch {
+            _uiState.value = AuthUiState.Loading
+            val result = authUseCase.loginWithCustomToken(signInToken)
+            result.onSuccess { user ->
+                _uiState.value = AuthUiState.Success(user)
+            }.onFailure { err ->
+                _uiState.value = AuthUiState.Error(err.message ?: "Sign-in failed")
+            }
+        }
+    }
+
     fun logout() {
         viewModelScope.launch {
             authUseCase.logout()
@@ -80,5 +115,9 @@ class AuthViewModel(
 
     fun resetState() {
         _uiState.value = AuthUiState.Idle
+    }
+
+    private fun isValidEmail(email: String): Boolean {
+        return Patterns.EMAIL_ADDRESS.matcher(email).matches()
     }
 }

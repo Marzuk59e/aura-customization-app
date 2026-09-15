@@ -54,6 +54,25 @@ data class UserEntity(
     val createdAt: Long = System.currentTimeMillis()
 )
 
+/**
+ * Local record of THIS device's registration for secure password-reset
+ * device authentication (replaces the old simulated OTP flow). This is a
+ * convenience cache only — [isActive] mirrors the backend's source of truth
+ * and is re-synced on login; the app never trusts this row alone to allow a
+ * password reset (see DeviceAuthRepository — every reset still requires a
+ * fresh signed challenge verified by the backend).
+ */
+@Entity(tableName = "trusted_devices")
+data class TrustedDeviceEntity(
+    @PrimaryKey val userId: String,
+    val email: String,
+    val deviceId: String,
+    val keyAlias: String,
+    val deviceLabel: String,
+    val registeredAt: Long = System.currentTimeMillis(),
+    val isActive: Boolean = true
+)
+
 @Entity(tableName = "saved_setups")
 data class SavedSetupEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -79,3 +98,40 @@ data class FavoriteEntity(
     val previewUrl: String = "",
     val addedAt: Long = System.currentTimeMillis()
 )
+
+@Entity(tableName = "cached_wallpapers")
+data class CachedWallpaperEntity(
+    @PrimaryKey val id: String,
+    val title: String,
+    val imageUrl: String,
+    val thumbnailUrl: String,
+    val category: String = "General",
+    val tier: String = "free",
+    val downloads: Int = 0,
+    val cachedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "cached_icon_packs")
+data class CachedIconPackEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val description: String = "",
+    val iconCount: Int = 0,
+    val previewUrl: String = "",
+    val tier: String = "free",
+    val author: String = "Aura Studio",
+    val cachedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "cached_themes")
+data class CachedThemeEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val description: String = "",
+    val primaryColor: String = "#7000FF",
+    val secondaryColor: String = "#00F2FE",
+    val previewUrl: String = "",
+    val tier: String = "free",
+    val cachedAt: Long = System.currentTimeMillis()
+)
+
