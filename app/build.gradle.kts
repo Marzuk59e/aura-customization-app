@@ -14,6 +14,13 @@ android {
         applicationId = "com.aura.launcher"
         minSdk = 26
         targetSdk = 34
+
+        // ---------------------------------------------------------------
+        // App release version — edit these two lines manually for each
+        // new release. versionCode must always increase; versionName
+        // follows MAJOR.MINOR.PATCH (Semantic Versioning).
+        // See docs/VERSIONING.md for the full rule.
+        // ---------------------------------------------------------------
         versionCode = 2
         versionName = "1.0.0"
 
