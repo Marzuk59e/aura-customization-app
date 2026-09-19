@@ -9,7 +9,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -20,19 +19,14 @@ sealed interface AuthUiState {
     data class Error(val message: String) : AuthUiState
 }
 
-/**
- * Phase 4.4: the simple Supabase-email-link forgot-password flow.
- * RequestSent covers both steps of that flow up to the emailed link;
- * [confirmPasswordReset] (fired after the app reopens via the deep link)
- * drives the rest.
- */
-sealed interface ForgotPasswordUiState {
-    data object Idle : ForgotPasswordUiState
-    data object Sending : ForgotPasswordUiState
-    data object RequestSent : ForgotPasswordUiState
-    data object Confirming : ForgotPasswordUiState
-    data object ResetSuccess : ForgotPasswordUiState
-    data class Error(val message: String) : ForgotPasswordUiState
+/** Which panel of the forgot-password modal is showing — mirrors the approved web design's 4 steps. */
+enum class ForgotPasswordStep { EMAIL, CODE, CHOICE, NEW_PASSWORD, SUCCESS }
+
+/** Loading/error status for whichever action the current step's button triggers. */
+sealed interface ForgotPasswordOpState {
+    data object Idle : ForgotPasswordOpState
+    data object Loading : ForgotPasswordOpState
+    data class Error(val message: String) : ForgotPasswordOpState
 }
 
 class AuthViewModel(
@@ -48,17 +42,15 @@ class AuthViewModel(
     private val _uiState = MutableStateFlow<AuthUiState>(AuthUiState.Idle)
     val uiState: StateFlow<AuthUiState> = _uiState.asStateFlow()
 
-    private val _forgotPasswordState = MutableStateFlow<ForgotPasswordUiState>(ForgotPasswordUiState.Idle)
-    val forgotPasswordState: StateFlow<ForgotPasswordUiState> = _forgotPasswordState.asStateFlow()
+    private val _forgotStep = MutableStateFlow(ForgotPasswordStep.EMAIL)
+    val forgotStep: StateFlow<ForgotPasswordStep> = _forgotStep.asStateFlow()
 
-    /** True once MainActivity has captured a Supabase recovery deep link — tells the UI to show the "set new password" step instead of "enter your email". */
-    val hasRecoveryLink: StateFlow<Boolean> = PasswordRecoveryLinkHolder.current
-        .map { it != null }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = PasswordRecoveryLinkHolder.current.value != null
-        )
+    private val _forgotOpState = MutableStateFlow<ForgotPasswordOpState>(ForgotPasswordOpState.Idle)
+    val forgotOpState: StateFlow<ForgotPasswordOpState> = _forgotOpState.asStateFlow()
+
+    /** The email the code was sent to — kept here so the CODE step can show "sent to x@y.com" and resend without re-asking. */
+    private val _forgotEmail = MutableStateFlow("")
+    val forgotEmail: StateFlow<String> = _forgotEmail.asStateFlow()
 
     fun login(email: String, password: String) {
         if (email.isBlank() || password.isBlank()) {
@@ -123,44 +115,115 @@ class AuthViewModel(
         }
     }
 
-    /** Step 1 of the new Supabase forgot-password flow: sends the reset email. */
-    fun requestPasswordReset(email: String) {
-        if (email.isBlank() || !isValidEmail(email.trim())) {
-            _forgotPasswordState.value = ForgotPasswordUiState.Error("Please enter a valid email address")
+    /** Step EMAIL: sends the 6-digit code, then advances to CODE. */
+    fun sendResetCode(email: String) {
+        val trimmed = email.trim()
+        if (trimmed.isBlank() || !isValidEmail(trimmed)) {
+            _forgotOpState.value = ForgotPasswordOpState.Error("Please enter a valid email address")
             return
         }
         viewModelScope.launch {
-            _forgotPasswordState.value = ForgotPasswordUiState.Sending
-            authUseCase.requestPasswordReset(email.trim())
-                .onSuccess { _forgotPasswordState.value = ForgotPasswordUiState.RequestSent }
+            _forgotOpState.value = ForgotPasswordOpState.Loading
+            authUseCase.requestPasswordReset(trimmed)
+                .onSuccess {
+                    _forgotEmail.value = trimmed
+                    _forgotOpState.value = ForgotPasswordOpState.Idle
+                    _forgotStep.value = ForgotPasswordStep.CODE
+                }
                 .onFailure { err ->
-                    _forgotPasswordState.value = ForgotPasswordUiState.Error(err.message ?: "Couldn't send the reset email")
+                    _forgotOpState.value = ForgotPasswordOpState.Error(err.message ?: "Couldn't send the code")
                 }
         }
     }
 
-    /** Step 2: called after the app reopens via the emailed deep link and the user types a new password. */
-    fun confirmPasswordReset(newPassword: String, confirmPassword: String) {
+    /** "Resend code" link on the CODE step — same call, stays on CODE either way. */
+    fun resendResetCode() {
+        val email = _forgotEmail.value
+        if (email.isBlank()) return
+        viewModelScope.launch {
+            _forgotOpState.value = ForgotPasswordOpState.Loading
+            authUseCase.requestPasswordReset(email)
+                .onSuccess { _forgotOpState.value = ForgotPasswordOpState.Idle }
+                .onFailure { err ->
+                    _forgotOpState.value = ForgotPasswordOpState.Error(err.message ?: "Couldn't resend the code")
+                }
+        }
+    }
+
+    /** Step CODE: checks the typed 6 digits, then advances to CHOICE. */
+    fun verifyResetCode(code: String) {
+        if (code.length != 6) {
+            _forgotOpState.value = ForgotPasswordOpState.Error("Enter all 6 digits")
+            return
+        }
+        viewModelScope.launch {
+            _forgotOpState.value = ForgotPasswordOpState.Loading
+            authUseCase.verifyPasswordResetCode(_forgotEmail.value, code)
+                .onSuccess {
+                    _forgotOpState.value = ForgotPasswordOpState.Idle
+                    _forgotStep.value = ForgotPasswordStep.CHOICE
+                }
+                .onFailure { err ->
+                    _forgotOpState.value = ForgotPasswordOpState.Error(err.message ?: "That code didn't match — try again.")
+                }
+        }
+    }
+
+    /** Step CHOICE → "Update password": just moves to NEW_PASSWORD, no network call yet. */
+    fun chooseUpdatePassword() {
+        _forgotOpState.value = ForgotPasswordOpState.Idle
+        _forgotStep.value = ForgotPasswordStep.NEW_PASSWORD
+    }
+
+    /** Step CHOICE → "Continue to dashboard": signs the user in with the session the verified code already proved, skipping a password change entirely. */
+    fun continueWithoutReset(onSignedIn: () -> Unit) {
+        viewModelScope.launch {
+            _forgotOpState.value = ForgotPasswordOpState.Loading
+            authUseCase.loginWithVerifiedRecoverySession()
+                .onSuccess {
+                    _forgotOpState.value = ForgotPasswordOpState.Idle
+                    onSignedIn()
+                }
+                .onFailure { err ->
+                    _forgotOpState.value = ForgotPasswordOpState.Error(err.message ?: "Couldn't sign you in")
+                }
+        }
+    }
+
+    /** Step NEW_PASSWORD: sets the new password using the verified-code session, then advances to SUCCESS. */
+    fun confirmNewPassword(newPassword: String, confirmPassword: String) {
         if (newPassword.length < 6) {
-            _forgotPasswordState.value = ForgotPasswordUiState.Error("Password must be at least 6 characters")
+            _forgotOpState.value = ForgotPasswordOpState.Error("Password must be at least 6 characters")
             return
         }
         if (newPassword != confirmPassword) {
-            _forgotPasswordState.value = ForgotPasswordUiState.Error("Passwords do not match")
+            _forgotOpState.value = ForgotPasswordOpState.Error("Passwords don't match")
             return
         }
         viewModelScope.launch {
-            _forgotPasswordState.value = ForgotPasswordUiState.Confirming
+            _forgotOpState.value = ForgotPasswordOpState.Loading
             authUseCase.confirmPasswordReset(newPassword)
-                .onSuccess { _forgotPasswordState.value = ForgotPasswordUiState.ResetSuccess }
+                .onSuccess {
+                    _forgotOpState.value = ForgotPasswordOpState.Idle
+                    _forgotStep.value = ForgotPasswordStep.SUCCESS
+                }
                 .onFailure { err ->
-                    _forgotPasswordState.value = ForgotPasswordUiState.Error(err.message ?: "Couldn't reset the password")
+                    _forgotOpState.value = ForgotPasswordOpState.Error(err.message ?: "Couldn't reset the password")
                 }
         }
     }
 
+    /** "← Use a different email" on the CODE step. */
+    fun backToEmailStep() {
+        _forgotOpState.value = ForgotPasswordOpState.Idle
+        _forgotStep.value = ForgotPasswordStep.EMAIL
+    }
+
+    /** Call when the forgot-password dialog is closed/torn down, so a fresh open always starts clean. */
     fun resetForgotPasswordState() {
-        _forgotPasswordState.value = ForgotPasswordUiState.Idle
+        _forgotOpState.value = ForgotPasswordOpState.Idle
+        _forgotStep.value = ForgotPasswordStep.EMAIL
+        _forgotEmail.value = ""
     }
 
     fun resetState() {

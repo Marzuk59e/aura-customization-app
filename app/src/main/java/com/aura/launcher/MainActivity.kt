@@ -50,24 +50,16 @@ class MainActivity : FragmentActivity() {
         app.appWidgetHost.stopListening()
     }
 
-    // singleTask launchMode means a re-tapped deep link (app already running)
+    // singleTask launchMode means a re-tapped intent (app already running)
     // arrives here instead of a fresh onCreate.
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleIncomingIntent(intent)
-    }
-
-    private fun handleIncomingIntent(intent: Intent?) {
-        PasswordRecoveryLink.fromDeepLink(intent?.data)?.let { link ->
-            PasswordRecoveryLinkHolder.publish(link)
-        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        handleIncomingIntent(intent)
 
         val factory = ViewModelFactory(app)
 

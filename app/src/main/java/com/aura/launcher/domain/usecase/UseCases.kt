@@ -50,8 +50,12 @@ class AuthUseCase(private val authRepository: AuthRepository) {
     suspend fun logout() = authRepository.logout()
     suspend fun requestPasswordReset(email: String): Result<Unit> =
         authRepository.requestPasswordReset(email)
+    suspend fun verifyPasswordResetCode(email: String, code: String): Result<Unit> =
+        authRepository.verifyPasswordResetCode(email, code)
     suspend fun confirmPasswordReset(newPassword: String): Result<Unit> =
         authRepository.confirmPasswordReset(newPassword)
+    suspend fun loginWithVerifiedRecoverySession(): Result<User> =
+        authRepository.loginWithVerifiedRecoverySession()
 }
 
 class ManageSavedSetupsUseCase(

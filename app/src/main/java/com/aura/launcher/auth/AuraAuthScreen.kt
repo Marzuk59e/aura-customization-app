@@ -34,6 +34,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -898,40 +899,43 @@ private fun LoginSuccessOverlay(displayName: String?, visible: Boolean) {
 }
 
 /**
- * Forgot-password modal (Phase 4.5 — Supabase email-link flow, replacing the
- * old device-verified biometric flow). Two independent steps:
- *  1. Enter email → AuthViewModel.requestPasswordReset() emails a Supabase
- *     reset link (GoTrue never reveals whether the address has an account).
- *  2. The person opens that email on this device → the auralauncher://
- *     reset-callback deep link (Phase 4.3) captures the token → this dialog
- *     jumps straight to "set a new password" the moment authViewModel's
- *     hasRecoveryLink flips true, wherever it was in step 1.
+ * Forgot-password modal — 6-digit email code flow, no link:
+ *  1. EMAIL: AuthViewModel.sendResetCode() emails a 6-digit code (GoTrue
+ *     never reveals whether the address has an account).
+ *  2. CODE: the person types the 6 digits here → verifyResetCode() checks
+ *     them against GoTrue directly (no deep link, no leaving the app).
+ *  3. CHOICE: once verified, either set a new password or skip straight to
+ *     signing in with the session the verified code already proved.
+ *  4. NEW_PASSWORD → SUCCESS: sets the password, then the person signs back
+ *     in with it from the normal Sign In form.
  */
 @Composable
 private fun ForgotPasswordDialog(
     authViewModel: AuthViewModel,
     onDismiss: () -> Unit
 ) {
-    val forgotState by authViewModel.forgotPasswordState.collectAsState()
-    val hasRecoveryLink by authViewModel.hasRecoveryLink.collectAsState()
+    val step by authViewModel.forgotStep.collectAsState()
+    val opState by authViewModel.forgotOpState.collectAsState()
+    val forgotEmail by authViewModel.forgotEmail.collectAsState()
 
     var emailInput by remember { mutableStateOf("") }
+    var otpCode by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var newPasswordVisible by remember { mutableStateOf(false) }
     var confirmPasswordVisible by remember { mutableStateOf(false) }
 
     // Reset ViewModel state whenever this dialog is torn down, so a stale
-    // Error/ResetSuccess from a previous open never leaks into a fresh one.
+    // Error/step from a previous open never leaks into a fresh one.
     DisposableEffect(Unit) {
         onDispose { authViewModel.resetForgotPasswordState() }
     }
 
-    val step = when {
-        forgotState is ForgotPasswordUiState.ResetSuccess -> ForgotStep.SUCCESS
-        hasRecoveryLink -> ForgotStep.SET_PASSWORD
-        forgotState is ForgotPasswordUiState.RequestSent -> ForgotStep.SENT
-        else -> ForgotStep.EMAIL_INPUT
+    // Clear the typed code whenever we land back on the CODE step fresh
+    // (first arrival, or after "use a different email") so a rejected code
+    // never lingers in the boxes.
+    LaunchedEffect(step) {
+        if (step == ForgotPasswordStep.EMAIL) otpCode = ""
     }
 
     // Drawn as a normal composable inside the screen's own Box - NOT a
@@ -987,18 +991,19 @@ private fun ForgotPasswordDialog(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         ModalBadge(
                             symbol = when (currentStep) {
-                                ForgotStep.SUCCESS -> BadgeSymbol.Success
-                                ForgotStep.SET_PASSWORD -> BadgeSymbol.Lock
+                                ForgotPasswordStep.SUCCESS -> BadgeSymbol.Success
+                                ForgotPasswordStep.CHOICE -> BadgeSymbol.Success
+                                ForgotPasswordStep.NEW_PASSWORD -> BadgeSymbol.Lock
                                 else -> BadgeSymbol.Question
                             }
                         )
                         Spacer(modifier = Modifier.height(14.dp))
 
                         when (currentStep) {
-                            ForgotStep.EMAIL_INPUT -> {
-                                Text("Reset your password", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+                            ForgotPasswordStep.EMAIL -> {
+                                Text("Forgot your password?", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
                                 Text(
-                                    "Enter your account email and we'll send you a reset link.",
+                                    "No worries — enter your email and we'll send a reset code.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = TextSecondary,
                                     textAlign = TextAlign.Center
@@ -1011,36 +1016,89 @@ private fun ForgotPasswordDialog(
                                     leadingIcon = Icons.Default.Email,
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Done)
                                 )
-                                (forgotState as? ForgotPasswordUiState.Error)?.let { error ->
+                                (opState as? ForgotPasswordOpState.Error)?.let { error ->
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Text(error.message, style = MaterialTheme.typography.bodySmall, color = Color(0xFFFF6B6B), textAlign = TextAlign.Center)
                                 }
                                 Spacer(modifier = Modifier.height(16.dp))
                                 GradientCtaButton(
-                                    label = "Send reset link",
-                                    isLoading = forgotState is ForgotPasswordUiState.Sending,
+                                    label = "Send code",
+                                    isLoading = opState is ForgotPasswordOpState.Loading,
                                     isSuccess = false,
                                     enabled = emailInput.isNotBlank(),
-                                    onClick = { authViewModel.requestPasswordReset(emailInput) }
+                                    onClick = { authViewModel.sendResetCode(emailInput) }
                                 )
                             }
 
-                            ForgotStep.SENT -> {
-                                Text("Check your inbox", style = MaterialTheme.typography.titleMedium, color = TextPrimary, textAlign = TextAlign.Center)
+                            ForgotPasswordStep.CODE -> {
+                                Text("Enter verification code", style = MaterialTheme.typography.titleMedium, color = TextPrimary, textAlign = TextAlign.Center)
                                 Text(
-                                    "We've sent a reset link to ${emailInput.trim().ifBlank { "your email" }}. Open it on this device to continue.",
+                                    "We sent a 6-digit code to ${forgotEmail.ifBlank { "your email" }}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = TextSecondary,
                                     textAlign = TextAlign.Center
                                 )
                                 Spacer(modifier = Modifier.height(16.dp))
-                                SecondaryCtaButton(label = "Done", onClick = onDismiss)
+                                OtpCodeRow(
+                                    code = otpCode,
+                                    onCodeChange = { otpCode = it },
+                                    isError = opState is ForgotPasswordOpState.Error,
+                                    onDone = { authViewModel.verifyResetCode(otpCode) }
+                                )
+                                (opState as? ForgotPasswordOpState.Error)?.let { error ->
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Text(error.message, style = MaterialTheme.typography.bodySmall, color = Color(0xFFFF6B6B), textAlign = TextAlign.Center)
+                                }
+                                Spacer(modifier = Modifier.height(16.dp))
+                                GradientCtaButton(
+                                    label = "Verify code",
+                                    isLoading = opState is ForgotPasswordOpState.Loading,
+                                    isSuccess = false,
+                                    enabled = otpCode.length == 6,
+                                    onClick = { authViewModel.verifyResetCode(otpCode) }
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                TextButton(onClick = { authViewModel.backToEmailStep() }) {
+                                    Text("← Use a different email", color = TextSecondary, fontSize = 13.sp)
+                                }
+                                ResendCodeRow(onResend = { authViewModel.resendResetCode() })
                             }
 
-                            ForgotStep.SET_PASSWORD -> {
+                            ForgotPasswordStep.CHOICE -> {
+                                Text("Code verified", style = MaterialTheme.typography.titleMedium, color = TextPrimary, textAlign = TextAlign.Center)
+                                Text(
+                                    "You're good to go. Set a new password now, or continue with your current one.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary,
+                                    textAlign = TextAlign.Center
+                                )
+                                (opState as? ForgotPasswordOpState.Error)?.let { error ->
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(error.message, style = MaterialTheme.typography.bodySmall, color = Color(0xFFFF6B6B), textAlign = TextAlign.Center)
+                                }
+                                Spacer(modifier = Modifier.height(16.dp))
+                                GradientCtaButton(
+                                    label = "Update password",
+                                    isLoading = false,
+                                    isSuccess = false,
+                                    enabled = opState !is ForgotPasswordOpState.Loading,
+                                    onClick = { authViewModel.chooseUpdatePassword() }
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                if (opState is ForgotPasswordOpState.Loading) {
+                                    CircularProgressIndicator(color = AuraCyan, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                                } else {
+                                    SecondaryCtaButton(
+                                        label = "Continue to dashboard",
+                                        onClick = { authViewModel.continueWithoutReset(onSignedIn = onDismiss) }
+                                    )
+                                }
+                            }
+
+                            ForgotPasswordStep.NEW_PASSWORD -> {
                                 Text("Set a new password", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
                                 Text(
-                                    "Choose a new password for your account.",
+                                    "Make it something you'll remember.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = TextSecondary,
                                     textAlign = TextAlign.Center
@@ -1059,28 +1117,28 @@ private fun ForgotPasswordDialog(
                                 AuraAuthTextField(
                                     value = confirmPassword,
                                     onValueChange = { confirmPassword = it },
-                                    label = "Confirm password",
+                                    label = "Confirm new password",
                                     leadingIcon = Icons.Default.Lock,
                                     isPassword = true,
                                     passwordVisible = confirmPasswordVisible,
                                     onTogglePasswordVisibility = { confirmPasswordVisible = !confirmPasswordVisible },
                                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done)
                                 )
-                                (forgotState as? ForgotPasswordUiState.Error)?.let { error ->
+                                (opState as? ForgotPasswordOpState.Error)?.let { error ->
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Text(error.message, style = MaterialTheme.typography.bodySmall, color = Color(0xFFFF6B6B), textAlign = TextAlign.Center)
                                 }
                                 Spacer(modifier = Modifier.height(16.dp))
                                 GradientCtaButton(
-                                    label = "Reset password",
-                                    isLoading = forgotState is ForgotPasswordUiState.Confirming,
+                                    label = "Confirm",
+                                    isLoading = opState is ForgotPasswordOpState.Loading,
                                     isSuccess = false,
                                     enabled = newPassword.isNotBlank() && confirmPassword.isNotBlank(),
-                                    onClick = { authViewModel.confirmPasswordReset(newPassword, confirmPassword) }
+                                    onClick = { authViewModel.confirmNewPassword(newPassword, confirmPassword) }
                                 )
                             }
 
-                            ForgotStep.SUCCESS -> {
+                            ForgotPasswordStep.SUCCESS -> {
                                 Text("Password updated", style = MaterialTheme.typography.titleMedium, color = TextPrimary, textAlign = TextAlign.Center)
                                 Text(
                                     "Your password has been reset. Sign in with your new password.",
@@ -1116,8 +1174,6 @@ private fun ForgotPasswordDialog(
         }
     }
 }
-
-private enum class ForgotStep { EMAIL_INPUT, SENT, SET_PASSWORD, SUCCESS }
 
 /** Smaller gradient CTA used inside the forgot-password dialog (Send code / Verify code). */
 @Composable
@@ -1167,6 +1223,105 @@ private fun GradientCtaButton(
                 AuthButtonVisualState.Success -> Icon(Icons.Default.Check, contentDescription = null, tint = onDarkText)
                 AuthButtonVisualState.Label -> Text(label, fontWeight = FontWeight.Bold, color = onDarkText)
             }
+        }
+    }
+}
+
+/**
+ * 6-digit code entry — matches the web prototype's 6 individual boxes. Uses
+ * one invisible field to own the keyboard/value and draws the boxes as pure
+ * decoration, which sidesteps juggling 6 separate FocusRequesters/backspace
+ * handling across fields (a common, more fragile way to build this in Compose).
+ */
+@Composable
+private fun OtpCodeRow(
+    code: String,
+    onCodeChange: (String) -> Unit,
+    isError: Boolean,
+    onDone: () -> Unit
+) {
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        BasicTextField(
+            value = code,
+            onValueChange = { new -> onCodeChange(new.filter { it.isDigit() }.take(6)) },
+            modifier = Modifier
+                .matchParentSize()
+                .focusRequester(focusRequester)
+                .semantics { invisibleToUser() },
+            textStyle = TextStyle(color = Color.Transparent),
+            cursorBrush = SolidColor(Color.Transparent),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { if (code.length == 6) onDone() })
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { focusRequester.requestFocus() },
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            repeat(6) { index ->
+                val char = code.getOrNull(index)?.toString() ?: ""
+                val isCurrent = index == code.length
+                Box(
+                    modifier = Modifier
+                        .size(width = 44.dp, height = 52.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(DarkSurfaceVariant)
+                        .border(
+                            width = if (isCurrent || char.isNotEmpty()) 1.5.dp else 1.dp,
+                            color = when {
+                                isError -> Color(0xFFFF6B6B)
+                                isCurrent -> AuraCyan
+                                char.isNotEmpty() -> DarkBorder.copy(alpha = 0.8f)
+                                else -> DarkBorder
+                            },
+                            shape = RoundedCornerShape(10.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(char, color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+/** "Didn't get it? Resend code (30s)" — a short local cooldown so the button can't be spammed; the actual email is re-sent via [onResend]. */
+@Composable
+private fun ResendCodeRow(onResend: () -> Unit) {
+    var secondsLeft by remember { mutableStateOf(30) }
+    LaunchedEffect(Unit) {
+        while (secondsLeft > 0) {
+            delay(1000)
+            secondsLeft--
+        }
+    }
+    Spacer(modifier = Modifier.height(8.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Didn't get it? ", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+        if (secondsLeft > 0) {
+            Text("Resend in ${secondsLeft}s", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+        } else {
+            Text(
+                "Resend code",
+                style = MaterialTheme.typography.bodySmall,
+                color = AuraCyan,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) {
+                    onResend()
+                    secondsLeft = 30
+                }
+            )
         }
     }
 }

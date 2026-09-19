@@ -24,9 +24,33 @@ data class SupabaseRefreshRequestDto(
     @SerializedName("refresh_token") val refreshToken: String
 )
 
-/** Body for /auth/v1/recover — GoTrue emails a reset link, no response body to speak of. */
-data class SupabaseRecoverRequestDto(
-    val email: String
+/**
+ * Body for /auth/v1/otp — asks GoTrue to email a 6-digit one-time code to
+ * [email] (createUser=false so this never silently creates a new account
+ * during "forgot password"). No response body on success.
+ *
+ * NOTE: whether the email shows a clickable link or a plain 6-digit code is
+ * controlled by the "Magic Link" email template in the Supabase project's
+ * Auth settings, not by this request — the template must use the
+ * `{{ .Token }}` variable (not `{{ .ConfirmationURL }}`) for the code-only
+ * flow this app implements.
+ */
+data class SupabaseOtpRequestDto(
+    val email: String,
+    @SerializedName("create_user") val createUser: Boolean = false
+)
+
+/**
+ * Body for /auth/v1/verify — checks the 6-digit [token] the user typed in
+ * against the one GoTrue emailed. On success this returns a full session
+ * (access_token/refresh_token/user), exactly like a normal login — that
+ * session is what proves the code was correct and is used both to set a
+ * new password and, if the user skips resetting, to sign them straight in.
+ */
+data class SupabaseVerifyOtpRequestDto(
+    val type: String = "recovery",
+    val email: String,
+    val token: String
 )
 
 /**

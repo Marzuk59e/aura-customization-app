@@ -1,12 +1,13 @@
 package com.aura.launcher.data.remote.api
 
 import com.aura.launcher.data.remote.dto.SupabaseAuthResponseDto
+import com.aura.launcher.data.remote.dto.SupabaseOtpRequestDto
 import com.aura.launcher.data.remote.dto.SupabasePasswordGrantRequestDto
-import com.aura.launcher.data.remote.dto.SupabaseRecoverRequestDto
 import com.aura.launcher.data.remote.dto.SupabaseRefreshRequestDto
 import com.aura.launcher.data.remote.dto.SupabaseSignUpRequestDto
 import com.aura.launcher.data.remote.dto.SupabaseUpdateUserRequestDto
 import com.aura.launcher.data.remote.dto.SupabaseUserDto
+import com.aura.launcher.data.remote.dto.SupabaseVerifyOtpRequestDto
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.Header
@@ -38,20 +39,22 @@ interface SupabaseAuthApi {
         @Body body: SupabaseRefreshRequestDto
     ): Response<SupabaseAuthResponseDto>
 
-    // Sends the reset email; GoTrue redirects the link inside that email to
-    // whatever "redirect_to" is passed here (Phase 4.3's auralauncher://
-    // reset-callback deep link) — that redirect URL must also be added under
-    // Additional Redirect URLs in the Supabase project's Auth settings, or
-    // GoTrue will reject the request. No response body on success (204/200).
-    @POST("auth/v1/recover")
-    suspend fun recover(
-        @Body body: SupabaseRecoverRequestDto,
-        @Query("redirect_to") redirectTo: String = "auralauncher://reset-callback"
-    ): Response<Unit>
+    // Emails a 6-digit one-time code (no link) — see SupabaseOtpRequestDto
+    // for the email-template caveat. No response body on success (204/200).
+    // GoTrue returns 200 here whether or not the address has an account, by
+    // design, so this never leaks which emails are registered.
+    @POST("auth/v1/otp")
+    suspend fun sendOtp(@Body body: SupabaseOtpRequestDto): Response<Unit>
 
-    // The recovery-link access_token stands in for a normal session here —
-    // that's what proves the user clicked their own email link. It is NOT
-    // the app's usual logged-in session token.
+    // Checks the typed 6-digit code and, on success, returns a real session
+    // (access_token/refresh_token/user) — GoTrue proves "this is the person
+    // who owns the email" the same way it would after a password login.
+    @POST("auth/v1/verify")
+    suspend fun verifyOtp(@Body body: SupabaseVerifyOtpRequestDto): Response<SupabaseAuthResponseDto>
+
+    // The verified-code access_token stands in for a normal session here —
+    // that's what proves the user typed the right code. It is NOT the app's
+    // usual logged-in session token (that one comes from login()/signUp()).
     @PUT("auth/v1/user")
     suspend fun updateUser(
         @Header("Authorization") authorization: String,

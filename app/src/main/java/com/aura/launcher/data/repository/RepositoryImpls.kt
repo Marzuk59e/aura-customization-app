@@ -8,11 +8,12 @@ import com.aura.launcher.data.local.entities.*
 import com.aura.launcher.data.remote.api.AuthApi
 import com.aura.launcher.data.remote.api.SupabaseAuthApi
 import com.aura.launcher.data.remote.dto.SupabaseErrorResponseDto
+import com.aura.launcher.data.remote.dto.SupabaseOtpRequestDto
 import com.aura.launcher.data.remote.dto.SupabasePasswordGrantRequestDto
-import com.aura.launcher.data.remote.dto.SupabaseRecoverRequestDto
 import com.aura.launcher.data.remote.dto.SupabaseSignUpRequestDto
 import com.aura.launcher.data.remote.dto.SupabaseUpdateUserRequestDto
-import com.aura.launcher.auth.PasswordRecoveryLinkHolder
+import com.aura.launcher.data.remote.dto.SupabaseUserDto
+import com.aura.launcher.data.remote.dto.SupabaseVerifyOtpRequestDto
 import com.aura.launcher.domain.model.*
 import com.aura.launcher.domain.repository.*
 import com.google.gson.Gson
@@ -217,6 +218,43 @@ class AuthRepositoryImpl(
         return userDao.getCurrentUserDirect()?.toDomain()
     }
 
+    // Populated by verifyPasswordResetCode() once the 6-digit code checks
+    // out; held only in memory (never persisted) until confirmPasswordReset()
+    // or loginWithVerifiedRecoverySession() consumes it, or the process dies
+    // — which is fine, since that just means the user re-enters the code.
+    private var pendingRecoveryAccessToken: String? = null
+    private var pendingRecoveryRefreshToken: String? = null
+    private var pendingRecoveryExpiresIn: Long? = null
+    private var pendingRecoveryUser: SupabaseUserDto? = null
+
+    private fun clearPendingRecoverySession() {
+        pendingRecoveryAccessToken = null
+        pendingRecoveryRefreshToken = null
+        pendingRecoveryExpiresIn = null
+        pendingRecoveryUser = null
+    }
+
+    /** Shared by login() and loginWithVerifiedRecoverySession() — saves the Supabase tokens, syncs/caches the profile, and marks the session active. */
+    private suspend fun establishSession(
+        accessToken: String,
+        refreshToken: String,
+        expiresIn: Long?,
+        supabaseUser: SupabaseUserDto,
+        fallbackEmail: String
+    ): User {
+        authPreferences.saveSupabaseTokens(accessToken, refreshToken, expiresIn ?: 3600L)
+        val supabaseUserId = supabaseUser.id
+        @Suppress("UNCHECKED_CAST")
+        val metadataName = (supabaseUser.userMetadata?.get("full_name") as? String)
+        val user = syncProfileFromBackend(
+            supabaseUserId,
+            fallbackEmail = supabaseUser.email ?: fallbackEmail,
+            fallbackName = metadataName ?: fallbackEmail.substringBefore("@")
+        )
+        authPreferences.saveSession(supabaseUserId, isGuest = false)
+        return user
+    }
+
     override suspend fun signUp(email: String, name: String, passwordHash: String): Result<User> {
         return try {
             val response = supabaseAuthApi.signUp(
@@ -268,18 +306,7 @@ class AuthRepositoryImpl(
                 return Result.failure(Exception(friendlySupabaseError(response, isSignUp = false)))
             }
 
-            authPreferences.saveSupabaseTokens(body.accessToken, body.refreshToken, body.expiresIn ?: 3600L)
-
-            val supabaseUserId = body.user.id
-            @Suppress("UNCHECKED_CAST")
-            val metadataName = (body.user.userMetadata?.get("full_name") as? String)
-            val user = syncProfileFromBackend(
-                supabaseUserId,
-                fallbackEmail = body.user.email ?: email,
-                fallbackName = metadataName ?: email.substringBefore("@")
-            )
-            authPreferences.saveSession(supabaseUserId, isGuest = false)
-
+            val user = establishSession(body.accessToken, body.refreshToken, body.expiresIn, body.user, fallbackEmail = email)
             Result.success(user)
         } catch (e: Exception) {
             Result.failure(Exception(e.message ?: "Login failed. Please check your connection."))
@@ -376,33 +403,95 @@ class AuthRepositoryImpl(
 
     override suspend fun requestPasswordReset(email: String): Result<Unit> {
         return try {
-            val response = supabaseAuthApi.recover(SupabaseRecoverRequestDto(email = email.trim()))
+            val response = supabaseAuthApi.sendOtp(SupabaseOtpRequestDto(email = email.trim()))
             // GoTrue returns 200/204 whether or not the email exists, by
             // design (so this never leaks which emails have accounts).
             if (response.isSuccessful) Result.success(Unit)
             else Result.failure(Exception(friendlySupabaseError(response, isSignUp = false)))
         } catch (e: Exception) {
-            Result.failure(Exception(e.message ?: "Couldn't send the reset email. Please check your connection."))
+            Result.failure(Exception(e.message ?: "Couldn't send the code. Please check your connection."))
+        }
+    }
+
+    override suspend fun verifyPasswordResetCode(email: String, code: String): Result<Unit> {
+        return try {
+            val response = supabaseAuthApi.verifyOtp(
+                SupabaseVerifyOtpRequestDto(email = email.trim(), token = code.trim())
+            )
+            val body = response.body()
+
+            if (!response.isSuccessful || body?.accessToken == null || body.refreshToken == null || body.user == null) {
+                return Result.failure(Exception(friendlyOtpError(response)))
+            }
+
+            pendingRecoveryAccessToken = body.accessToken
+            pendingRecoveryRefreshToken = body.refreshToken
+            pendingRecoveryExpiresIn = body.expiresIn
+            pendingRecoveryUser = body.user
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(Exception(e.message ?: "Couldn't verify the code. Please check your connection."))
+        }
+    }
+
+    /** friendlySupabaseError's generic mapping doesn't cover /verify's specific wrong/expired-code case, so it gets its own copy matching the approved design's "That code didn't match" text. */
+    private fun friendlyOtpError(response: Response<*>): String {
+        val raw = try {
+            val errorBody = response.errorBody()?.string()
+            if (errorBody.isNullOrBlank()) null
+            else {
+                val parsed = Gson().fromJson(errorBody, SupabaseErrorResponseDto::class.java)
+                parsed.msg ?: parsed.errorDescription ?: parsed.error
+            }
+        } catch (e: Exception) {
+            null
+        }
+        val lower = raw?.lowercase() ?: ""
+        return when {
+            "expired" in lower || "invalid" in lower -> "That code didn't match — try again."
+            !raw.isNullOrBlank() -> raw
+            else -> "That code didn't match — try again."
         }
     }
 
     override suspend fun confirmPasswordReset(newPassword: String): Result<Unit> {
-        val link = PasswordRecoveryLinkHolder.current.value
-            ?: return Result.failure(Exception("This reset link has expired. Please request a new one."))
+        val accessToken = pendingRecoveryAccessToken
+            ?: return Result.failure(Exception("Your code has expired. Please request a new one."))
 
         return try {
             val response = supabaseAuthApi.updateUser(
-                authorization = "Bearer ${link.accessToken}",
+                authorization = "Bearer $accessToken",
                 body = SupabaseUpdateUserRequestDto(password = newPassword)
             )
             if (response.isSuccessful) {
-                PasswordRecoveryLinkHolder.consume()
+                clearPendingRecoverySession()
                 Result.success(Unit)
             } else {
                 Result.failure(Exception(friendlySupabaseError(response, isSignUp = false)))
             }
         } catch (e: Exception) {
             Result.failure(Exception(e.message ?: "Couldn't reset the password. Please check your connection."))
+        }
+    }
+
+    override suspend fun loginWithVerifiedRecoverySession(): Result<User> {
+        val accessToken = pendingRecoveryAccessToken
+        val refreshToken = pendingRecoveryRefreshToken
+        val supabaseUser = pendingRecoveryUser
+        if (accessToken == null || refreshToken == null || supabaseUser == null) {
+            return Result.failure(Exception("Your code has expired. Please request a new one."))
+        }
+
+        return try {
+            val user = establishSession(
+                accessToken, refreshToken, pendingRecoveryExpiresIn, supabaseUser,
+                fallbackEmail = supabaseUser.email ?: ""
+            )
+            clearPendingRecoverySession()
+            Result.success(user)
+        } catch (e: Exception) {
+            Result.failure(Exception(e.message ?: "Couldn't sign you in. Please check your connection."))
         }
     }
 }

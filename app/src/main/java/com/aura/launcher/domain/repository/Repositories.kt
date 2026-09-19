@@ -34,10 +34,14 @@ interface AuthRepository {
     suspend fun continueAsGuest(): User
     suspend fun logout()
 
-    /** Phase 4.4: emails a Supabase reset link to [email]. Always succeeds the same way whether or not the account exists (GoTrue doesn't reveal that). */
+    /** Emails a 6-digit one-time code to [email]. Always succeeds the same way whether or not the account exists (GoTrue doesn't reveal that). */
     suspend fun requestPasswordReset(email: String): Result<Unit>
-    /** Sets the new password using the access_token captured from the emailed reset link (see PasswordRecoveryLink). Fails if no recovery link is currently held. */
+    /** Checks the typed 6-digit [code] for [email] and, on success, holds the returned session in memory for [confirmPasswordReset]/[loginWithVerifiedRecoverySession] to use. */
+    suspend fun verifyPasswordResetCode(email: String, code: String): Result<Unit>
+    /** Sets the new password using the access_token captured by [verifyPasswordResetCode]. Fails if no code has been verified yet. */
     suspend fun confirmPasswordReset(newPassword: String): Result<Unit>
+    /** Signs the user straight in using the session from [verifyPasswordResetCode], for when they verify their email but don't want to change their password. Fails if no code has been verified yet. */
+    suspend fun loginWithVerifiedRecoverySession(): Result<User>
 }
 
 interface SavedSetupRepository {
