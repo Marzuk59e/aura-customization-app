@@ -44,6 +44,20 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Supabase password-recovery redirect (Phase 4.3). GoTrue's
+                 reset email points here with tokens in the URL fragment
+                 (see PasswordRecoveryLink.fromDeepLink). This exact URL must
+                 also be added under Additional Redirect URLs in the
+                 Supabase project's Auth settings, or GoTrue rejects it. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="auralauncher"
+                    android:host="reset-callback" />
+            </intent-filter>
         </activity>
 
         <!-- Package Change Receiver for dynamic app list update -->

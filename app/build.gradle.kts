@@ -3,7 +3,6 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.ksp)
     alias(libs.plugins.kotlin.compose)
-    alias(libs.plugins.google.services)
 }
 
 android {
@@ -21,6 +20,31 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // Supabase + backend config — real values come from local.properties
+        // (gitignored, never committed) or CI secrets, never hardcoded here.
+        // See local.properties.example for the keys to set.
+        val localProperties = java.util.Properties().apply {
+            val localFile = rootProject.file("local.properties")
+            if (localFile.exists()) {
+                localFile.inputStream().use { load(it) }
+            }
+        }
+        fun configValue(key: String, fallback: String): String =
+            (localProperties.getProperty(key) ?: System.getenv(key) ?: fallback)
+
+        buildConfigField(
+            "String", "SUPABASE_URL",
+            "\"${configValue("SUPABASE_URL", "https://YOUR-PROJECT-REF.supabase.co")}\""
+        )
+        buildConfigField(
+            "String", "SUPABASE_ANON_KEY",
+            "\"${configValue("SUPABASE_ANON_KEY", "YOUR_SUPABASE_ANON_KEY")}\""
+        )
+        buildConfigField(
+            "String", "API_BASE_URL",
+            "\"${configValue("API_BASE_URL", "https://YOUR-BACKEND.vercel.app/api/v1/")}\""
+        )
     }
 
     buildTypes {
@@ -41,6 +65,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         resources {
@@ -86,15 +111,7 @@ dependencies {
     // Palette
     implementation(libs.androidx.palette)
 
-    // Firebase (Auth only — user profile data is owned by the PHP backend,
-    // which talks to Firestore server-side via Firebase Admin SDK)
-    implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.auth)
-    implementation(libs.kotlinx.coroutines.play.services)
-
-    // Biometric / device-credential authentication (secure password-reset
-    // device verification — replaces the old simulated OTP step)
-    implementation(libs.androidx.biometric)
+    // MainActivity extends FragmentActivity
     implementation(libs.androidx.fragment.ktx)
 
     debugImplementation(libs.androidx.ui.tooling)

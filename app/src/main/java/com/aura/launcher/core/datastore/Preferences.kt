@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import com.aura.launcher.domain.model.LauncherSettings
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 val Context.launcherDataStore: DataStore<Preferences> by preferencesDataStore(name = "launcher_settings")
@@ -132,6 +133,14 @@ class AuthPreferences(private val context: Context) {
     companion object {
         val ACTIVE_USER_ID = stringPreferencesKey("active_user_id")
         val IS_GUEST = booleanPreferencesKey("is_guest")
+
+        // Supabase session (Phase 2) — replaces the old Firebase ID token,
+        // which never needed local storage since the Firebase SDK held it.
+        val SUPABASE_ACCESS_TOKEN = stringPreferencesKey("supabase_access_token")
+        val SUPABASE_REFRESH_TOKEN = stringPreferencesKey("supabase_refresh_token")
+        // Epoch millis; when "now >= this - buffer" the token is treated as
+        // expiring soon and refreshed before use (see SupabaseSessionManager).
+        val SUPABASE_TOKEN_EXPIRES_AT = longPreferencesKey("supabase_token_expires_at")
     }
 
     val activeUserIdFlow: Flow<String?> = context.authDataStore.data.map { prefs ->
@@ -149,10 +158,39 @@ class AuthPreferences(private val context: Context) {
         }
     }
 
+    /**
+     * Persists a fresh Supabase session. [expiresInSeconds] is GoTrue's
+     * `expires_in` from the token response — we convert it to an absolute
+     * epoch-millis deadline up front so callers never have to redo that math.
+     */
+    suspend fun saveSupabaseTokens(accessToken: String, refreshToken: String, expiresInSeconds: Long) {
+        val expiresAtMillis = System.currentTimeMillis() + (expiresInSeconds * 1000L)
+        context.authDataStore.edit { prefs ->
+            prefs[SUPABASE_ACCESS_TOKEN] = accessToken
+            prefs[SUPABASE_REFRESH_TOKEN] = refreshToken
+            prefs[SUPABASE_TOKEN_EXPIRES_AT] = expiresAtMillis
+        }
+    }
+
+    suspend fun getSupabaseAccessToken(): String? = context.authDataStore.data.first()[SUPABASE_ACCESS_TOKEN]
+    suspend fun getSupabaseRefreshToken(): String? = context.authDataStore.data.first()[SUPABASE_REFRESH_TOKEN]
+    suspend fun getSupabaseTokenExpiresAt(): Long? = context.authDataStore.data.first()[SUPABASE_TOKEN_EXPIRES_AT]
+
+    suspend fun clearSupabaseTokens() {
+        context.authDataStore.edit { prefs ->
+            prefs.remove(SUPABASE_ACCESS_TOKEN)
+            prefs.remove(SUPABASE_REFRESH_TOKEN)
+            prefs.remove(SUPABASE_TOKEN_EXPIRES_AT)
+        }
+    }
+
     suspend fun clearSession() {
         context.authDataStore.edit { prefs ->
             prefs.remove(ACTIVE_USER_ID)
             prefs[IS_GUEST] = true
+            prefs.remove(SUPABASE_ACCESS_TOKEN)
+            prefs.remove(SUPABASE_REFRESH_TOKEN)
+            prefs.remove(SUPABASE_TOKEN_EXPIRES_AT)
         }
     }
 }

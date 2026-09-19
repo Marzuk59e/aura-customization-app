@@ -28,14 +28,6 @@ data class IconPackDto(
     val author: String = "Aura Studio"
 )
 
-data class IconMappingDto(
-    val id: String? = null,
-    val name: String,
-    val componentName: String,
-    val imageUrl: String,
-    val format: String = "webp"
-)
-
 data class ThemeDto(
     val id: String,
     val name: String,
@@ -49,15 +41,6 @@ data class ThemeDto(
     val previewUrl: String? = null,
     val tier: String = "free",
     val status: String = "published"
-)
-
-data class WidgetDto(
-    val id: String,
-    val name: String,
-    val kind: String = "clock",
-    val defaultSize: String = "4x2",
-    val previewUrl: String? = null,
-    val tier: String = "free"
 )
 
 data class AppVersionDto(
@@ -86,26 +69,29 @@ data class CategoryDto(
     val itemCount: Int = 0
 )
 
+// Subset of a published widget document (public/widgets). Field names match
+// what the admin panel stores: `kind` (not type), `widgetVersion`, `tier`.
 data class PublicWidgetDto(
     val id: String,
     val name: String,
-    val type: String = "clock",
+    val kind: String = "clock",
     val price: Double = 0.0,
-    val isFree: Boolean = true,
+    val tier: String = "free",
     val previewUrl: String? = null,
-    val version: String = "1.0.0"
+    val widgetVersion: String = "1.0.0"
+) {
+    val isFree: Boolean get() = tier != "premium"
+}
+
+// public/featured returns whole (sanitised) content items; only the id is needed.
+data class PublicFeaturedDto(
+    val id: String
 )
 
-data class PublicHomeDto(
-    val featured: List<String>? = null,
-    val newProducts: List<String>? = null,
-    val popularProducts: List<String>? = null,
-    val categories: List<CategoryDto>? = null
-)
-
-// Mirrors AdminAccount / User profile returned by GET /auth/me on the PHP
-// backend (aura-launcher.unaux.com). The backend owns this document in
-// Firestore — the app never writes user profile fields directly.
+// Mirrors the AuthUser shape returned by GET /auth/me on the new Node
+// backend (routes/auth.routes.ts) — verified against a Supabase access
+// token. Backend owns this row (Postgres
+// `users` table) — the app never writes user profile fields directly.
 data class UserProfileDto(
     val uid: String,
     val name: String,
@@ -113,76 +99,6 @@ data class UserProfileDto(
     val photoUrl: String? = null,
     val role: String? = null,
     val status: String? = null,
+    val permissions: List<String>? = null,
     val lastLoginAt: String? = null
 )
-
-// ---------------------------------------------------------------------
-// Secure device authentication (password-reset device verification).
-// See DeviceAuthApi / DeviceAuthRepository. The backend never receives a
-// private key, a fingerprint/face template, or a PIN — only a public key
-// (at registration) and a signature over a one-time server challenge (at
-// verification), which it checks against the stored public key.
-// ---------------------------------------------------------------------
-
-/** POST auth/devices/register — sent right after a normal Firebase login. */
-data class DeviceRegisterRequestDto(
-    val deviceId: String,
-    val publicKey: String,       // Base64 X.509 SubjectPublicKeyInfo
-    val deviceLabel: String,     // e.g. "Pixel 8 Pro"
-    val algorithm: String = "SHA256withECDSA"
-)
-
-data class DeviceRegisterResponseDto(
-    val registered: Boolean,
-    val deviceId: String
-)
-
-/** POST auth/devices/challenge — first step of password-reset device verification. */
-data class DeviceChallengeRequestDto(
-    val email: String,
-    val deviceId: String
-)
-
-data class DeviceChallengeResponseDto(
-    val deviceTrusted: Boolean,
-    val deviceId: String? = null,
-    val challenge: String? = null,   // one-time random string to sign, null if not trusted
-    val expiresInSeconds: Int? = null
-)
-
-/** POST auth/devices/verify-reset — second step: signed challenge + new password. */
-data class DeviceVerifyResetRequestDto(
-    val email: String,
-    val deviceId: String,
-    val challenge: String,
-    val signature: String,       // Base64 signature over `challenge`, produced by the Keystore key
-    val newPassword: String
-)
-
-data class DeviceVerifyResetResponseDto(
-    val success: Boolean,
-    val message: String? = null,
-    // Optional Firebase custom token so the app can sign the user straight
-    // back in after a successful device-verified reset, without asking them
-    // to retype the password they just set.
-    val signInToken: String? = null
-)
-
-/**
- * POST auth/devices/verify-login — lighter sibling of verify-reset used by
- * the forgot-password flow now that a successful verification signs the
- * user straight in. Same signature check, no password field at all.
- */
-data class DeviceVerifyLoginRequestDto(
-    val email: String,
-    val deviceId: String,
-    val challenge: String,
-    val signature: String
-)
-
-data class DeviceVerifyLoginResponseDto(
-    val success: Boolean,
-    val message: String? = null,
-    val signInToken: String? = null
-)
-

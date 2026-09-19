@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.aura.launcher.AuraLauncherApp
 import com.aura.launcher.auth.AuthViewModel
-import com.aura.launcher.auth.DeviceAuthViewModel
 import com.aura.launcher.customization.explore.ExploreViewModel
 import com.aura.launcher.customization.setups.SavedSetupsViewModel
 import com.aura.launcher.launcher.appdrawer.AppDrawerViewModel
@@ -31,9 +30,6 @@ class ViewModelFactory(private val app: AuraLauncherApp) : ViewModelProvider.Fac
             }
             modelClass.isAssignableFrom(AuthViewModel::class.java) -> {
                 AuthViewModel(app.authUseCase) as T
-            }
-            modelClass.isAssignableFrom(DeviceAuthViewModel::class.java) -> {
-                DeviceAuthViewModel(app.deviceAuthUseCase, app.deviceCredentialManager) as T
             }
             modelClass.isAssignableFrom(SavedSetupsViewModel::class.java) -> {
                 SavedSetupsViewModel(

@@ -10,6 +10,7 @@ import com.aura.launcher.domain.repository.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.URL
+import android.util.Log
 
 import com.aura.launcher.data.local.dao.CachedContentDao
 import com.aura.launcher.data.local.entities.CachedIconPackEntity
@@ -59,10 +60,13 @@ class WallpaperRepositoryImpl(
     )
 
     override suspend fun getWallpapers(page: Int, category: String?): NetworkResult<List<RemoteWallpaper>> {
+        // The public endpoint returns every published wallpaper in one array
+        // (no paging), so later pages are empty by definition.
+        if (page > 1) return NetworkResult.Success(emptyList())
         return try {
-            val response = wallpaperApi.getWallpapers(page = page, categoryId = category)
+            val response = wallpaperApi.getWallpapers()
             if (response.isSuccessful && response.body() != null) {
-                val list = response.body()!!.items.map { dto ->
+                val list = response.body()!!.filter { category == null || it.categoryId == category }.map { dto ->
                     RemoteWallpaper(
                         id = dto.id,
                         title = dto.title,
@@ -90,9 +94,11 @@ class WallpaperRepositoryImpl(
                     fallbackToCache()
                 }
             } else {
+                Log.w("WallpaperRepo", "GET public/wallpapers failed: HTTP ${response.code()}")
                 fallbackToCache()
             }
         } catch (e: Exception) {
+            Log.w("WallpaperRepo", "GET public/wallpapers threw, using cache/defaults", e)
             fallbackToCache()
         }
     }
@@ -205,10 +211,11 @@ class IconPackRepositoryImpl(
     )
 
     override suspend fun getIconPacks(page: Int): NetworkResult<List<RemoteIconPack>> {
+        if (page > 1) return NetworkResult.Success(emptyList())
         return try {
-            val response = iconPackApi.getIconPacks(page = page)
+            val response = iconPackApi.getIconPacks()
             if (response.isSuccessful && response.body() != null) {
-                val list = response.body()!!.items.map { dto ->
+                val list = response.body()!!.map { dto ->
                     RemoteIconPack(
                         id = dto.id,
                         name = dto.name,
@@ -236,9 +243,11 @@ class IconPackRepositoryImpl(
                     fallbackToCache()
                 }
             } else {
+                Log.w("IconPackRepo", "GET public/icon-packs failed: HTTP ${response.code()}")
                 fallbackToCache()
             }
         } catch (e: Exception) {
+            Log.w("IconPackRepo", "GET public/icon-packs threw, using cache/defaults", e)
             fallbackToCache()
         }
     }
@@ -301,10 +310,11 @@ class ThemeRepositoryImpl(
     )
 
     override suspend fun getThemes(page: Int): NetworkResult<List<RemoteTheme>> {
+        if (page > 1) return NetworkResult.Success(emptyList())
         return try {
-            val response = themeApi.getThemes(page = page)
+            val response = themeApi.getThemes()
             if (response.isSuccessful && response.body() != null) {
-                val list = response.body()!!.items.map { dto ->
+                val list = response.body()!!.map { dto ->
                     RemoteTheme(
                         id = dto.id,
                         name = dto.name,
@@ -332,9 +342,11 @@ class ThemeRepositoryImpl(
                     fallbackToCache()
                 }
             } else {
+                Log.w("ThemeRepo", "GET public/themes failed: HTTP ${response.code()}")
                 fallbackToCache()
             }
         } catch (e: Exception) {
+            Log.w("ThemeRepo", "GET public/themes threw, using cache/defaults", e)
             fallbackToCache()
         }
     }

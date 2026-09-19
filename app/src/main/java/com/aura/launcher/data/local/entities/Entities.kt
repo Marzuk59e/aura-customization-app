@@ -54,25 +54,6 @@ data class UserEntity(
     val createdAt: Long = System.currentTimeMillis()
 )
 
-/**
- * Local record of THIS device's registration for secure password-reset
- * device authentication (replaces the old simulated OTP flow). This is a
- * convenience cache only — [isActive] mirrors the backend's source of truth
- * and is re-synced on login; the app never trusts this row alone to allow a
- * password reset (see DeviceAuthRepository — every reset still requires a
- * fresh signed challenge verified by the backend).
- */
-@Entity(tableName = "trusted_devices")
-data class TrustedDeviceEntity(
-    @PrimaryKey val userId: String,
-    val email: String,
-    val deviceId: String,
-    val keyAlias: String,
-    val deviceLabel: String,
-    val registeredAt: Long = System.currentTimeMillis(),
-    val isActive: Boolean = true
-)
-
 @Entity(tableName = "saved_setups")
 data class SavedSetupEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

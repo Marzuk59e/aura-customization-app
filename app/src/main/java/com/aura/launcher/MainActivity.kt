@@ -1,5 +1,6 @@
 package com.aura.launcher
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -49,16 +50,30 @@ class MainActivity : FragmentActivity() {
         app.appWidgetHost.stopListening()
     }
 
+    // singleTask launchMode means a re-tapped deep link (app already running)
+    // arrives here instead of a fresh onCreate.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingIntent(intent)
+    }
+
+    private fun handleIncomingIntent(intent: Intent?) {
+        PasswordRecoveryLink.fromDeepLink(intent?.data)?.let { link ->
+            PasswordRecoveryLinkHolder.publish(link)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        handleIncomingIntent(intent)
 
         val factory = ViewModelFactory(app)
 
         val homeViewModel: HomeViewModel by viewModels { factory }
         val appDrawerViewModel: AppDrawerViewModel by viewModels { factory }
         val authViewModel: AuthViewModel by viewModels { factory }
-        val deviceAuthViewModel: DeviceAuthViewModel by viewModels { factory }
         val savedSetupsViewModel: SavedSetupsViewModel by viewModels { factory }
         val settingsViewModel: SettingsViewModel by viewModels { factory }
         val exploreViewModel: ExploreViewModel by viewModels { factory }
@@ -161,8 +176,6 @@ class MainActivity : FragmentActivity() {
                             )
                             LauncherScreen.LOGIN -> AuraAuthScreen(
                                 authViewModel = authViewModel,
-                                deviceAuthViewModel = deviceAuthViewModel,
-                                activity = this@MainActivity,
                                 onAuthSuccess = { currentScreen = LauncherScreen.HOME },
                                 onBack = { currentScreen = LauncherScreen.HOME }
                             )

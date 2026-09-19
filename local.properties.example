@@ -1,0 +1,15 @@
+# Copy the lines below into your own local.properties (already gitignored —
+# never commit real values). sdk.dir stays whatever Android Studio already
+# wrote there; just add these three keys under it.
+
+SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co
+SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_OR_PUBLISHABLE_KEY
+API_BASE_URL=https://YOUR-BACKEND.vercel.app/api/v1/
+
+# SUPABASE_ANON_KEY is the public/anon (or new "publishable") key from
+# Supabase Dashboard -> Project Settings -> API. Never put the
+# service-role key here — that one is backend-only.
+#
+# These are read at build time (app/build.gradle.kts) into
+# BuildConfig.SUPABASE_URL / BuildConfig.SUPABASE_ANON_KEY / BuildConfig.API_BASE_URL
+# for use by the Supabase Auth client and Retrofit — wired up in Phase 2/3.

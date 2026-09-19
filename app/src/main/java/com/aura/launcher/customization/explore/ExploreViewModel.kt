@@ -9,7 +9,6 @@ import com.aura.launcher.customization.vibesync.VibeSyncEngine
 import com.aura.launcher.data.remote.api.PublicApi
 import com.aura.launcher.data.remote.api.RemoteConfigApi
 import com.aura.launcher.data.remote.dto.CategoryDto
-import com.aura.launcher.data.remote.dto.PublicHomeDto
 import com.aura.launcher.data.remote.dto.PublicWidgetDto
 import com.aura.launcher.domain.model.*
 import com.aura.launcher.domain.repository.*
@@ -86,28 +85,33 @@ class ExploreViewModel(
                 else -> {}
             }
 
-            // Fetch live public data from admin panel
-            try {
-                publicApi?.let { api ->
-                    val homeResp = api.getPublicHome()
-                    if (homeResp.isSuccessful && homeResp.body() != null) {
-                        val body = homeResp.body()!!
-                        body.featured?.let { _featuredIds.value = it }
-                        body.categories?.let { _publicCategories.value = it }
+            // Live public data from the admin backend. Each call is isolated so
+            // one failing/misshapen response can't blank out the others.
+            publicApi?.let { api ->
+                try {
+                    val featuredResp = api.getPublicFeatured()
+                    if (featuredResp.isSuccessful && featuredResp.body() != null) {
+                        _featuredIds.value = featuredResp.body()!!.map { it.id }
                     }
-
+                } catch (e: Exception) {
+                    android.util.Log.w("ExploreVM", "GET public/featured failed", e)
+                }
+                try {
                     val widgetResp = api.getPublicWidgets()
                     if (widgetResp.isSuccessful && widgetResp.body() != null) {
                         _publicWidgets.value = widgetResp.body()!!
                     }
-
+                } catch (e: Exception) {
+                    android.util.Log.w("ExploreVM", "GET public/widgets failed", e)
+                }
+                try {
                     val catResp = api.getPublicCategories()
                     if (catResp.isSuccessful && catResp.body() != null) {
                         _publicCategories.value = catResp.body()!!
                     }
+                } catch (e: Exception) {
+                    android.util.Log.w("ExploreVM", "GET public/categories failed", e)
                 }
-            } catch (e: Exception) {
-                // Silently fallback if server is unreachable
             }
 
             _isLoading.value = false

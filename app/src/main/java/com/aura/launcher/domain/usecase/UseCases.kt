@@ -46,54 +46,12 @@ class AuthUseCase(private val authRepository: AuthRepository) {
         authRepository.signUp(email, name, password)
     suspend fun login(email: String, password: String): Result<User> =
         authRepository.login(email, password)
-    suspend fun loginWithCustomToken(signInToken: String): Result<User> =
-        authRepository.loginWithCustomToken(signInToken)
     suspend fun continueAsGuest(): User = authRepository.continueAsGuest()
     suspend fun logout() = authRepository.logout()
-}
-
-class DeviceAuthUseCase(private val deviceAuthRepository: DeviceAuthRepository) {
-    fun getDeviceSecurityCapability(): DeviceSecurityCapability =
-        deviceAuthRepository.getDeviceSecurityCapability()
-
-    suspend fun hasLocalDeviceKey(userId: String): Boolean =
-        deviceAuthRepository.hasLocalDeviceKey(userId)
-
-    suspend fun registerDevice(userId: String, email: String, deviceLabel: String): Result<Unit> =
-        deviceAuthRepository.registerDevice(userId, email, deviceLabel)
-
-    suspend fun forgetDevice(userId: String) = deviceAuthRepository.forgetDevice(userId)
-
-    suspend fun getLocalUserIdForEmail(email: String): String? =
-        deviceAuthRepository.getLocalUserIdForEmail(email)
-
-    suspend fun getAllTrustedAccounts(): List<TrustedAccountSummary> =
-        deviceAuthRepository.getAllTrustedAccounts()
-
-    suspend fun checkDeviceTrust(email: String): Result<DeviceTrustCheck> =
-        deviceAuthRepository.checkDeviceTrust(email)
-
-    suspend fun verifyDeviceAndResetPassword(
-        email: String,
-        deviceId: String,
-        challenge: String,
-        signatureBase64: String,
-        newPassword: String
-    ): Result<DeviceVerificationResult> = deviceAuthRepository.verifyDeviceAndResetPassword(
-        email, deviceId, challenge, signatureBase64, newPassword
-    )
-
-    suspend fun verifyDeviceAndLogin(
-        email: String,
-        deviceId: String,
-        challenge: String,
-        signatureBase64: String
-    ): Result<DeviceLoginResult> = deviceAuthRepository.verifyDeviceAndLogin(
-        email, deviceId, challenge, signatureBase64
-    )
-
-    suspend fun sendFallbackResetEmail(email: String): Result<Unit> =
-        deviceAuthRepository.sendFallbackResetEmail(email)
+    suspend fun requestPasswordReset(email: String): Result<Unit> =
+        authRepository.requestPasswordReset(email)
+    suspend fun confirmPasswordReset(newPassword: String): Result<Unit> =
+        authRepository.confirmPasswordReset(newPassword)
 }
 
 class ManageSavedSetupsUseCase(

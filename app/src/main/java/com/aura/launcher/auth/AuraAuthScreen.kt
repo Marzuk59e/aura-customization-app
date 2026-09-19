@@ -79,9 +79,7 @@ import androidx.compose.ui.unit.sp
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.ui.draw.blur
-import androidx.fragment.app.FragmentActivity
 import com.aura.launcher.core.theme.*
-import com.aura.launcher.domain.model.DeviceSecurityCapability
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.cos
@@ -100,16 +98,14 @@ private fun isValidEmail(input: String): Boolean =
  *
  * Notes on scope:
  *  - "Continue with Google" is still UI-only for now — no backend wired up yet.
- *  - Forgot-password now uses real secure device authentication (BiometricPrompt +
- *    Android Keystore + backend-verified signature) instead of a simulated OTP —
- *    see ForgotPasswordDialog and DeviceAuthViewModel.
+ *  - Forgot-password now uses a simple emailed Supabase reset link instead
+ *    of the old device-verified biometric flow — see ForgotPasswordDialog
+ *    and AuthViewModel.requestPasswordReset/confirmPasswordReset.
  *  - "Continue as guest" is kept (existing app feature, not present in the web design).
  */
 @Composable
 fun AuraAuthScreen(
     authViewModel: AuthViewModel,
-    deviceAuthViewModel: DeviceAuthViewModel,
-    activity: androidx.fragment.app.FragmentActivity,
     onAuthSuccess: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -119,7 +115,6 @@ fun AuraAuthScreen(
     var showSuccessOverlay by remember { mutableStateOf(false) }
     var showForgotDialog by remember { mutableStateOf(false) }
     var toastMessage by remember { mutableStateOf<String?>(null) }
-    var pendingDeviceUser by remember { mutableStateOf<com.aura.launcher.domain.model.User?>(null) }
 
     LaunchedEffect(uiState) {
         if (uiState is AuthUiState.Success) {
@@ -127,14 +122,8 @@ fun AuraAuthScreen(
             toastMessage = "Signed in — welcome back."
             delay(1300)
             showSuccessOverlay = false
-            val user = (uiState as AuthUiState.Success).user
-            val offerDeviceSetup = !user.isGuest && deviceAuthViewModel.shouldOfferRegistration(user.id)
             authViewModel.resetState()
-            if (offerDeviceSetup) {
-                pendingDeviceUser = user
-            } else {
-                onAuthSuccess()
-            }
+            onAuthSuccess()
         }
     }
 
@@ -213,29 +202,8 @@ fun AuraAuthScreen(
 
         if (showForgotDialog) {
             ForgotPasswordDialog(
-                activity = activity,
-                deviceAuthViewModel = deviceAuthViewModel,
-                onDismiss = { showForgotDialog = false },
-                onToast = { toastMessage = it },
-                onDeviceSignIn = { signInToken ->
-                    showForgotDialog = false
-                    // Reuses the LaunchedEffect(uiState) above for the success
-                    // overlay, the device-registration offer, and onAuthSuccess —
-                    // exactly the same finish line as a normal email/password login.
-                    authViewModel.completeDeviceSignIn(signInToken)
-                }
-            )
-        }
-
-        pendingDeviceUser?.let { user ->
-            DeviceRegistrationPromptDialog(
-                activity = activity,
-                deviceAuthViewModel = deviceAuthViewModel,
-                user = user,
-                onDone = {
-                    pendingDeviceUser = null
-                    onAuthSuccess()
-                }
+                authViewModel = authViewModel,
+                onDismiss = { showForgotDialog = false }
             )
         }
 
@@ -930,97 +898,40 @@ private fun LoginSuccessOverlay(displayName: String?, visible: Boolean) {
 }
 
 /**
- * Forgot-password modal. Never asks for an email up front: the account is
- * found locally (TrustedAccountSummary, from whichever device keys are
- * already registered on this install) and the person goes straight to their
- * platform's native BiometricPrompt (fingerprint / face / device PIN -
- * Android decides which, never this app). Up to
- * DeviceAuthViewModel.MAX_LOGIN_ATTEMPTS tries; a verified signature signs
- * the person straight in (no "set a new password" step at all). If no local
- * account is found, or every try is used up, it falls back to emailing a
- * normal Firebase reset link.
+ * Forgot-password modal (Phase 4.5 — Supabase email-link flow, replacing the
+ * old device-verified biometric flow). Two independent steps:
+ *  1. Enter email → AuthViewModel.requestPasswordReset() emails a Supabase
+ *     reset link (GoTrue never reveals whether the address has an account).
+ *  2. The person opens that email on this device → the auralauncher://
+ *     reset-callback deep link (Phase 4.3) captures the token → this dialog
+ *     jumps straight to "set a new password" the moment authViewModel's
+ *     hasRecoveryLink flips true, wherever it was in step 1.
  */
 @Composable
 private fun ForgotPasswordDialog(
-    activity: FragmentActivity,
-    deviceAuthViewModel: DeviceAuthViewModel,
-    onDismiss: () -> Unit,
-    onToast: (String) -> Unit,
-    onDeviceSignIn: (signInToken: String) -> Unit
+    authViewModel: AuthViewModel,
+    onDismiss: () -> Unit
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val forgotState by authViewModel.forgotPasswordState.collectAsState()
+    val hasRecoveryLink by authViewModel.hasRecoveryLink.collectAsState()
 
-    val verifyState by deviceAuthViewModel.verifyState.collectAsState()
-    val attemptsUsed by deviceAuthViewModel.attemptsUsed.collectAsState()
+    var emailInput by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var newPasswordVisible by remember { mutableStateOf(false) }
+    var confirmPasswordVisible by remember { mutableStateOf(false) }
 
-    // The email this session is currently working with — set automatically
-    // once local accounts are known (one match) or the person taps one
-    // (several matches). Stays blank if zero local accounts were found,
-    // which is when the fallback screen needs its own email field.
-    var email by remember { mutableStateOf("") }
-
-    var fallbackEmailInput by remember { mutableStateOf("") }
-    var fallbackEmailError by remember { mutableStateOf<String?>(null) }
-    var fallbackSending by remember { mutableStateOf(false) }
-    var fallbackSent by remember { mutableStateOf(false) }
-    var fallbackError by remember { mutableStateOf<String?>(null) }
-
-    // Kick off local-account detection once, when the dialog first appears.
-    LaunchedEffect(Unit) {
-        deviceAuthViewModel.startForgotPassword()
-    }
-
-    // Reset device-auth state whenever this dialog is torn down, so a stale
-    // Success/Failed from a previous attempt never leaks into a fresh open.
+    // Reset ViewModel state whenever this dialog is torn down, so a stale
+    // Error/ResetSuccess from a previous open never leaks into a fresh one.
     DisposableEffect(Unit) {
-        onDispose { deviceAuthViewModel.resetVerifyState() }
+        onDispose { authViewModel.resetForgotPasswordState() }
     }
 
-    // As soon as the backend hands back a challenge, immediately trigger the
-    // native biometric prompt — no separate "continue" tap needed.
-    LaunchedEffect(verifyState) {
-        when (val s = verifyState) {
-            is DeviceVerifyUiState.VerifiedReady ->
-                deviceAuthViewModel.authenticateAndLogin(
-                    activity = activity,
-                    userId = s.userId,
-                    email = email,
-                    deviceId = s.deviceId,
-                    challenge = s.challenge
-                )
-            is DeviceVerifyUiState.LoggedIn -> onDeviceSignIn(s.signInToken)
-            else -> Unit
-        }
-    }
-
-    val emailRegex = remember { Regex("^[^\\s@]+@[^\\s@]+\\.[a-zA-Z]{2,24}$") }
-
-    fun retry() {
-        deviceAuthViewModel.checkDeviceTrust(email)
-    }
-
-    fun pickAccount(accountEmail: String) {
-        email = accountEmail
-        deviceAuthViewModel.pickAccount(accountEmail)
-    }
-
-    fun sendFallbackEmail() {
-        if (fallbackSending || fallbackSent) return
-        val targetEmail = email.ifBlank {
-            val typed = fallbackEmailInput.trim()
-            if (!emailRegex.matches(typed)) {
-                fallbackEmailError = "Enter a valid email"
-                return
-            }
-            typed
-        }
-        fallbackEmailError = null
-        fallbackSending = true
-        fallbackError = null
-        deviceAuthViewModel.sendFallbackEmail(targetEmail) { success, message ->
-            fallbackSending = false
-            if (success) fallbackSent = true else fallbackError = message ?: "Couldn't send the reset email. Please try again."
-        }
+    val step = when {
+        forgotState is ForgotPasswordUiState.ResetSuccess -> ForgotStep.SUCCESS
+        hasRecoveryLink -> ForgotStep.SET_PASSWORD
+        forgotState is ForgotPasswordUiState.RequestSent -> ForgotStep.SENT
+        else -> ForgotStep.EMAIL_INPUT
     }
 
     // Drawn as a normal composable inside the screen's own Box - NOT a
@@ -1063,7 +974,7 @@ private fun ForgotPasswordDialog(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 AnimatedContent(
-                    targetState = verifyState,
+                    targetState = step,
                     transitionSpec = {
                         (fadeIn(tween(400, easing = FastOutSlowInEasing)) +
                             slideInHorizontally(
@@ -1072,259 +983,119 @@ private fun ForgotPasswordDialog(
                             )).togetherWith(fadeOut(tween(150)))
                     },
                     label = "forgotStepContent"
-                ) { state ->
+                ) { currentStep ->
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         ModalBadge(
-                            symbol = when (state) {
-                                is DeviceVerifyUiState.ChooseAccount -> BadgeSymbol.Question
-                                is DeviceVerifyUiState.LoggedIn -> BadgeSymbol.Lock
-                                else -> BadgeSymbol.Fingerprint
+                            symbol = when (currentStep) {
+                                ForgotStep.SUCCESS -> BadgeSymbol.Success
+                                ForgotStep.SET_PASSWORD -> BadgeSymbol.Lock
+                                else -> BadgeSymbol.Question
                             }
                         )
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        when (state) {
-                            DeviceVerifyUiState.CheckingLocalAccounts, DeviceVerifyUiState.CheckingTrust, DeviceVerifyUiState.Idle -> {
-                                Text("Checking this device", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+                        when (currentStep) {
+                            ForgotStep.EMAIL_INPUT -> {
+                                Text("Reset your password", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
                                 Text(
-                                    "One moment while we check your account recovery settings.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondary,
-                                    textAlign = TextAlign.Center
-                                )
-                                Spacer(modifier = Modifier.height(20.dp))
-                                CircularProgressIndicator(color = AuraCyan, modifier = Modifier.size(28.dp), strokeWidth = 3.dp)
-                                Spacer(modifier = Modifier.height(20.dp))
-                            }
-
-                            is DeviceVerifyUiState.ChooseAccount -> {
-                                Text("Which account?", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-                                Text(
-                                    "This device has more than one account set up.",
+                                    "Enter your account email and we'll send you a reset link.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = TextSecondary,
                                     textAlign = TextAlign.Center
                                 )
                                 Spacer(modifier = Modifier.height(16.dp))
-                                state.accounts.forEach { account ->
-                                    val masked = remember(account.email) {
-                                        val at = account.email.indexOf('@')
-                                        if (at <= 1) account.email
-                                        else account.email.first() + "***" + account.email.substring(at)
-                                    }
-                                    Surface(
-                                        onClick = { pickAccount(account.email) },
-                                        shape = RoundedCornerShape(14.dp),
-                                        color = DarkSurfaceVariant,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 4.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(Icons.Default.Email, contentDescription = null, tint = AuraCyan, modifier = Modifier.size(18.dp))
-                                            Spacer(modifier = Modifier.width(10.dp))
-                                            Column {
-                                                Text(masked, style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
-                                                Text(account.deviceLabel, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            is DeviceVerifyUiState.VerifiedReady, DeviceVerifyUiState.Authenticating, DeviceVerifyUiState.VerifyingWithBackend -> {
-                                Text(
-                                    if (state == DeviceVerifyUiState.VerifyingWithBackend) "Confirming..." else "Verify it's you",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = TextPrimary
+                                AuraAuthTextField(
+                                    value = emailInput,
+                                    onValueChange = { emailInput = it },
+                                    label = "Email address",
+                                    leadingIcon = Icons.Default.Email,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Done)
                                 )
-                                Text(
-                                    "Use your device's fingerprint, face, or PIN to sign in.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondary,
-                                    textAlign = TextAlign.Center
-                                )
-                                Spacer(modifier = Modifier.height(20.dp))
-                                CircularProgressIndicator(color = AuraCyan, modifier = Modifier.size(28.dp), strokeWidth = 3.dp)
-                                Spacer(modifier = Modifier.height(20.dp))
-                            }
-
-                            is DeviceVerifyUiState.LoggedIn -> {
-                                // onDeviceSignIn(...) already fired from the LaunchedEffect above;
-                                // this only shows for the brief moment before the dialog closes.
-                                Text("Verified", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-                                Spacer(modifier = Modifier.height(20.dp))
-                                CircularProgressIndicator(color = AuraSuccess, modifier = Modifier.size(28.dp), strokeWidth = 3.dp)
-                                Spacer(modifier = Modifier.height(20.dp))
-                            }
-
-                            DeviceVerifyUiState.NotTrustedDevice -> {
-                                val needsEmail = email.isBlank()
-                                Text(
-                                    if (needsEmail) "No device recovery set up" else "This device isn't registered",
-                                    style = MaterialTheme.typography.titleMedium, color = TextPrimary, textAlign = TextAlign.Center
-                                )
-                                Text(
-                                    if (attemptsUsed >= DeviceAuthViewModel.MAX_LOGIN_ATTEMPTS)
-                                        "That didn't match after a few tries. We can email you a reset link instead."
-                                    else
-                                        "We couldn't verify this as a trusted device for account recovery. We can email you a reset link instead.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondary,
-                                    textAlign = TextAlign.Center
-                                )
-                                Spacer(modifier = Modifier.height(16.dp))
-                                if (fallbackSent) {
-                                    Text(
-                                        "Reset link sent - check your inbox.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = AuraSuccess,
-                                        textAlign = TextAlign.Center
-                                    )
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    GradientCtaButton(
-                                        label = "Done",
-                                        isLoading = false,
-                                        isSuccess = false,
-                                        enabled = true,
-                                        onClick = onDismiss
-                                    )
-                                } else {
-                                    if (needsEmail) {
-                                        AuraAuthTextField(
-                                            value = fallbackEmailInput,
-                                            onValueChange = { fallbackEmailInput = it; fallbackEmailError = null },
-                                            label = "Email address",
-                                            leadingIcon = Icons.Default.Email,
-                                            isError = fallbackEmailError != null,
-                                            errorText = fallbackEmailError,
-                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Done)
-                                        )
-                                        Spacer(modifier = Modifier.height(12.dp))
-                                    }
-                                    fallbackError?.let {
-                                        Text(it, style = MaterialTheme.typography.bodySmall, color = Color(0xFFFF6B6B), textAlign = TextAlign.Center)
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                    }
-                                    GradientCtaButton(
-                                        label = "Email me a reset link",
-                                        isLoading = fallbackSending,
-                                        isSuccess = false,
-                                        enabled = !needsEmail || fallbackEmailInput.isNotBlank(),
-                                        onClick = { sendFallbackEmail() }
-                                    )
-                                }
-                            }
-
-                            DeviceVerifyUiState.NoSecurityConfigured -> {
-                                Text("Set up device security first", style = MaterialTheme.typography.titleMedium, color = TextPrimary, textAlign = TextAlign.Center)
-                                Text(
-                                    "This device doesn't have a screen lock or fingerprint set up yet, so it can't be used for account recovery.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondary,
-                                    textAlign = TextAlign.Center
-                                )
-                                Spacer(modifier = Modifier.height(16.dp))
-                                GradientCtaButton(
-                                    label = "Open security settings",
-                                    isLoading = false,
-                                    isSuccess = false,
-                                    enabled = true,
-                                    onClick = {
-                                        try {
-                                            context.startActivity(android.content.Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS))
-                                        } catch (e: Exception) {
-                                            onToast("Couldn't open settings on this device.")
-                                        }
-                                    }
-                                )
-                                Spacer(modifier = Modifier.height(12.dp))
-                                SecondaryCtaButton(
-                                    label = "Email me a reset link instead",
-                                    onClick = { sendFallbackEmail() }
-                                )
-                                if (fallbackSent) {
+                                (forgotState as? ForgotPasswordUiState.Error)?.let { error ->
                                     Spacer(modifier = Modifier.height(8.dp))
-                                    Text("Reset link sent - check your inbox.", style = MaterialTheme.typography.bodySmall, color = AuraSuccess, textAlign = TextAlign.Center)
+                                    Text(error.message, style = MaterialTheme.typography.bodySmall, color = Color(0xFFFF6B6B), textAlign = TextAlign.Center)
                                 }
+                                Spacer(modifier = Modifier.height(16.dp))
+                                GradientCtaButton(
+                                    label = "Send reset link",
+                                    isLoading = forgotState is ForgotPasswordUiState.Sending,
+                                    isSuccess = false,
+                                    enabled = emailInput.isNotBlank(),
+                                    onClick = { authViewModel.requestPasswordReset(emailInput) }
+                                )
                             }
 
-                            DeviceVerifyUiState.KeyInvalidated -> {
-                                Text("Device security has changed", style = MaterialTheme.typography.titleMedium, color = TextPrimary, textAlign = TextAlign.Center)
+                            ForgotStep.SENT -> {
+                                Text("Check your inbox", style = MaterialTheme.typography.titleMedium, color = TextPrimary, textAlign = TextAlign.Center)
                                 Text(
-                                    "Your device security settings have changed since this device was registered. Please use the email reset link instead.",
+                                    "We've sent a reset link to ${emailInput.trim().ifBlank { "your email" }}. Open it on this device to continue.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = TextSecondary,
                                     textAlign = TextAlign.Center
                                 )
                                 Spacer(modifier = Modifier.height(16.dp))
-                                if (fallbackSent) {
-                                    Text("Reset link sent - check your inbox.", style = MaterialTheme.typography.bodySmall, color = AuraSuccess, textAlign = TextAlign.Center)
-                                } else {
-                                    GradientCtaButton(
-                                        label = "Email me a reset link",
-                                        isLoading = fallbackSending,
-                                        isSuccess = false,
-                                        enabled = true,
-                                        onClick = { sendFallbackEmail() }
-                                    )
-                                }
+                                SecondaryCtaButton(label = "Done", onClick = onDismiss)
                             }
 
-                            is DeviceVerifyUiState.Failed -> {
-                                Text("Device verification failed", style = MaterialTheme.typography.titleMedium, color = TextPrimary, textAlign = TextAlign.Center)
+                            ForgotStep.SET_PASSWORD -> {
+                                Text("Set a new password", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
                                 Text(
-                                    state.message,
+                                    "Choose a new password for your account.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = TextSecondary,
                                     textAlign = TextAlign.Center
                                 )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                AuraAuthTextField(
+                                    value = newPassword,
+                                    onValueChange = { newPassword = it },
+                                    label = "New password",
+                                    leadingIcon = Icons.Default.Lock,
+                                    isPassword = true,
+                                    passwordVisible = newPasswordVisible,
+                                    onTogglePasswordVisibility = { newPasswordVisible = !newPasswordVisible }
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                AuraAuthTextField(
+                                    value = confirmPassword,
+                                    onValueChange = { confirmPassword = it },
+                                    label = "Confirm password",
+                                    leadingIcon = Icons.Default.Lock,
+                                    isPassword = true,
+                                    passwordVisible = confirmPasswordVisible,
+                                    onTogglePasswordVisibility = { confirmPasswordVisible = !confirmPasswordVisible },
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done)
+                                )
+                                (forgotState as? ForgotPasswordUiState.Error)?.let { error ->
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(error.message, style = MaterialTheme.typography.bodySmall, color = Color(0xFFFF6B6B), textAlign = TextAlign.Center)
+                                }
+                                Spacer(modifier = Modifier.height(16.dp))
+                                GradientCtaButton(
+                                    label = "Reset password",
+                                    isLoading = forgotState is ForgotPasswordUiState.Confirming,
+                                    isSuccess = false,
+                                    enabled = newPassword.isNotBlank() && confirmPassword.isNotBlank(),
+                                    onClick = { authViewModel.confirmPasswordReset(newPassword, confirmPassword) }
+                                )
+                            }
+
+                            ForgotStep.SUCCESS -> {
+                                Text("Password updated", style = MaterialTheme.typography.titleMedium, color = TextPrimary, textAlign = TextAlign.Center)
                                 Text(
-                                    "Attempt $attemptsUsed of ${DeviceAuthViewModel.MAX_LOGIN_ATTEMPTS}",
+                                    "Your password has been reset. Sign in with your new password.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = TextSecondary,
                                     textAlign = TextAlign.Center
                                 )
                                 Spacer(modifier = Modifier.height(16.dp))
                                 GradientCtaButton(
-                                    label = "Try again",
+                                    label = "Done",
                                     isLoading = false,
-                                    isSuccess = false,
+                                    isSuccess = true,
                                     enabled = true,
-                                    onClick = { retry() }
+                                    onClick = onDismiss
                                 )
-                            }
-
-                            DeviceVerifyUiState.Cancelled -> {
-                                Text("Verification cancelled", style = MaterialTheme.typography.titleMedium, color = TextPrimary, textAlign = TextAlign.Center)
-                                Text(
-                                    "No changes were made. You can try again whenever you're ready.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondary,
-                                    textAlign = TextAlign.Center
-                                )
-                                Text(
-                                    "Attempt $attemptsUsed of ${DeviceAuthViewModel.MAX_LOGIN_ATTEMPTS}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondary,
-                                    textAlign = TextAlign.Center
-                                )
-                                Spacer(modifier = Modifier.height(16.dp))
-                                GradientCtaButton(
-                                    label = "Try again",
-                                    isLoading = false,
-                                    isSuccess = false,
-                                    enabled = true,
-                                    onClick = { retry() }
-                                )
-                            }
-
-                            DeviceVerifyUiState.ResetSuccess -> {
-                                // Unused by this dialog now — a verified signature
-                                // signs the person in directly (see LoggedIn above).
                             }
                         }
                     }
@@ -1346,111 +1117,7 @@ private fun ForgotPasswordDialog(
     }
 }
 
-/**
- * Shown once, right after a normal (non-guest) login, on a device that has
- * true biometric hardware enrolled and no device key yet. Purely opt-in —
- * skipping it is always one tap away and never blocks getting into the app.
- * Reuses the same scrim/card/badge visual language as ForgotPasswordDialog.
- */
-@Composable
-private fun DeviceRegistrationPromptDialog(
-    activity: FragmentActivity,
-    deviceAuthViewModel: DeviceAuthViewModel,
-    user: com.aura.launcher.domain.model.User,
-    onDone: () -> Unit
-) {
-    val registerState by deviceAuthViewModel.registerState.collectAsState()
-    val deviceLabel = remember { "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}".trim() }
-
-    LaunchedEffect(registerState) {
-        when (registerState) {
-            DeviceRegisterUiState.Registered,
-            DeviceRegisterUiState.Skipped,
-            DeviceRegisterUiState.NotEligible -> {
-                delay(if (registerState == DeviceRegisterUiState.Registered) 1100 else 0)
-                deviceAuthViewModel.resetRegisterState()
-                onDone()
-            }
-            else -> Unit
-        }
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.78f))
-            .imePadding(),
-        contentAlignment = Alignment.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(0.9f)
-                .widthIn(max = 400.dp)
-                .clip(RoundedCornerShape(24.dp))
-                .background(DarkSurface)
-                .border(1.dp, DarkBorder, RoundedCornerShape(24.dp))
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                ModalBadge(
-                    symbol = if (registerState == DeviceRegisterUiState.Registered) BadgeSymbol.Success else BadgeSymbol.Fingerprint
-                )
-                Spacer(modifier = Modifier.height(14.dp))
-
-                when (registerState) {
-                    DeviceRegisterUiState.Registering, DeviceRegisterUiState.Prompting -> {
-                        Text("Setting up device recovery", style = MaterialTheme.typography.titleMedium, color = TextPrimary, textAlign = TextAlign.Center)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        CircularProgressIndicator(color = AuraCyan, modifier = Modifier.size(28.dp), strokeWidth = 3.dp)
-                        Spacer(modifier = Modifier.height(16.dp))
-                    }
-                    DeviceRegisterUiState.Registered -> {
-                        Text("Device recovery enabled", style = MaterialTheme.typography.titleMedium, color = TextPrimary, textAlign = TextAlign.Center)
-                        Text(
-                            "You can now use this device's security to reset your password if you ever forget it.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary,
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                    }
-                    is DeviceRegisterUiState.Failed -> {
-                        Text("Couldn't enable device recovery", style = MaterialTheme.typography.titleMedium, color = TextPrimary, textAlign = TextAlign.Center)
-                        Text(
-                            (registerState as DeviceRegisterUiState.Failed).message,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary,
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        SecondaryCtaButton(label = "Skip for now", onClick = { deviceAuthViewModel.skipRegistration() })
-                    }
-                    else -> {
-                        Text("Enable device recovery?", style = MaterialTheme.typography.titleMedium, color = TextPrimary, textAlign = TextAlign.Center)
-                        Text(
-                            "Use fingerprint, face unlock, or your device PIN to reset your password later — no email codes needed.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary,
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        GradientCtaButton(
-                            label = "Enable",
-                            isLoading = false,
-                            isSuccess = false,
-                            enabled = true,
-                            onClick = { deviceAuthViewModel.registerDevice(activity, user.id, user.email, deviceLabel) }
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        SecondaryCtaButton(label = "Not now", onClick = { deviceAuthViewModel.skipRegistration() })
-                    }
-                }
-            }
-        }
-    }
-}
+private enum class ForgotStep { EMAIL_INPUT, SENT, SET_PASSWORD, SUCCESS }
 
 /** Smaller gradient CTA used inside the forgot-password dialog (Send code / Verify code). */
 @Composable

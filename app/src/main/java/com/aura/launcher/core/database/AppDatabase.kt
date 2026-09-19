@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.aura.launcher.data.local.dao.*
 import com.aura.launcher.data.local.entities.*
 
@@ -17,10 +19,9 @@ import com.aura.launcher.data.local.entities.*
         FavoriteEntity::class,
         CachedWallpaperEntity::class,
         CachedIconPackEntity::class,
-        CachedThemeEntity::class,
-        TrustedDeviceEntity::class
+        CachedThemeEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -31,11 +32,19 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun savedSetupDao(): SavedSetupDao
     abstract fun favoriteDao(): FavoriteDao
     abstract fun cachedContentDao(): CachedContentDao
-    abstract fun trustedDeviceDao(): TrustedDeviceDao
 
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
+
+        // v3 -> v4 (Phase 4.6): the device-auth feature is gone, so its
+        // trusted_devices table is dropped. An explicit migration keeps every
+        // other table (home layout, saved setups, favorites) intact on update.
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS trusted_devices")
+            }
+        }
 
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -43,7 +52,10 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "aura_launcher.db"
-                ).fallbackToDestructiveMigration().build()
+                )
+                    .addMigrations(MIGRATION_3_4)
+                    .fallbackToDestructiveMigration()
+                    .build()
                 INSTANCE = instance
                 instance
             }

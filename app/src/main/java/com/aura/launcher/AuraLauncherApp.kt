@@ -6,15 +6,15 @@ import com.aura.launcher.core.database.AppDatabase
 import com.aura.launcher.core.datastore.AuthPreferences
 import com.aura.launcher.core.datastore.LauncherPreferences
 import com.aura.launcher.core.network.ApiClient
-import com.aura.launcher.core.security.DeviceCredentialManager
+import com.aura.launcher.core.network.SupabaseClient
 import com.aura.launcher.core.utils.PackageManagerHelper
 import com.aura.launcher.data.remote.api.*
+import com.aura.launcher.data.remote.auth.SupabaseSessionManager
 import com.aura.launcher.data.repository.*
 import com.aura.launcher.domain.repository.*
 import com.aura.launcher.domain.usecase.*
 
 import com.aura.launcher.receiver.AppChangeCallbackManager
-import com.google.firebase.auth.FirebaseAuth
 
 class AuraLauncherApp : Application() {
 
@@ -24,18 +24,17 @@ class AuraLauncherApp : Application() {
     lateinit var authPreferences: AuthPreferences private set
     lateinit var appChangeCallbackManager: AppChangeCallbackManager private set
     lateinit var appWidgetHost: com.aura.launcher.launcher.widget.AuraAppWidgetHost private set
-    lateinit var deviceCredentialManager: DeviceCredentialManager private set
 
     // APIs
     lateinit var publicApi: PublicApi private set
     lateinit var remoteConfigApi: RemoteConfigApi private set
-    lateinit var deviceAuthApi: DeviceAuthApi private set
+    lateinit var supabaseAuthApi: SupabaseAuthApi private set
+    lateinit var supabaseSessionManager: SupabaseSessionManager private set
 
     // Repositories
     lateinit var appRepository: AppRepository private set
     lateinit var homeRepository: HomeRepository private set
     lateinit var authRepository: AuthRepository private set
-    lateinit var deviceAuthRepository: DeviceAuthRepository private set
     lateinit var savedSetupRepository: SavedSetupRepository private set
     lateinit var settingsRepository: SettingsRepository private set
     lateinit var wallpaperRepository: WallpaperRepository private set
@@ -47,7 +46,6 @@ class AuraLauncherApp : Application() {
     lateinit var launchAppUseCase: LaunchAppUseCase private set
     lateinit var manageHomeItemsUseCase: ManageHomeItemsUseCase private set
     lateinit var authUseCase: AuthUseCase private set
-    lateinit var deviceAuthUseCase: DeviceAuthUseCase private set
     lateinit var manageSavedSetupsUseCase: ManageSavedSetupsUseCase private set
 
     override fun onCreate() {
@@ -62,7 +60,6 @@ class AuraLauncherApp : Application() {
         packageManagerHelper = PackageManagerHelper(this)
         launcherPreferences = LauncherPreferences(this)
         authPreferences = AuthPreferences(this)
-        deviceCredentialManager = DeviceCredentialManager(this)
 
         // Initialize real-time LauncherApps app change listener
         appChangeCallbackManager = AppChangeCallbackManager(this)
@@ -72,15 +69,23 @@ class AuraLauncherApp : Application() {
         appWidgetHost = com.aura.launcher.launcher.widget.AuraAppWidgetHost(this)
         // startListening() is lifecycle-bound to MainActivity (onStart/onStop) to prevent DeadObjectException
 
-        // Network Layer Retrofit & APIs (Points to live admin backend: aura-launcher.unaux.com/api/v1)
-        val retrofit = ApiClient.createRetrofit(authPreferences)
+        // Dedicated Supabase GoTrue client — separate Retrofit instance,
+        // separate base URL/headers from the backend Retrofit below.
+        val supabaseRetrofit = SupabaseClient.createRetrofit()
+        supabaseAuthApi = supabaseRetrofit.create(SupabaseAuthApi::class.java)
+        supabaseSessionManager = SupabaseSessionManager(authPreferences, supabaseAuthApi)
+
+        // Network Layer Retrofit & APIs (points at our own backend,
+        // BuildConfig.API_BASE_URL). AuthInterceptor attaches the Supabase
+        // access token (via supabaseSessionManager), auto-refreshing it
+        // first if it's expired or the backend rejects it with 401.
+        val retrofit = ApiClient.createRetrofit(authPreferences, supabaseSessionManager)
         val wallpaperApi = retrofit.create(WallpaperApi::class.java)
         val iconPackApi = retrofit.create(IconPackApi::class.java)
         val themeApi = retrofit.create(ThemeApi::class.java)
         publicApi = retrofit.create(PublicApi::class.java)
         remoteConfigApi = retrofit.create(RemoteConfigApi::class.java)
         val authApi = retrofit.create(AuthApi::class.java)
-        deviceAuthApi = retrofit.create(DeviceAuthApi::class.java)
 
         // Repositories
         appRepository = AppRepositoryImpl(database.appDao(), packageManagerHelper)
@@ -93,14 +98,8 @@ class AuraLauncherApp : Application() {
         authRepository = AuthRepositoryImpl(
             database.userDao(),
             authPreferences,
-            FirebaseAuth.getInstance(),
+            supabaseAuthApi,
             authApi
-        )
-        deviceAuthRepository = DeviceAuthRepositoryImpl(
-            deviceCredentialManager,
-            database.trustedDeviceDao(),
-            deviceAuthApi,
-            FirebaseAuth.getInstance()
         )
         savedSetupRepository = SavedSetupRepositoryImpl(
             database.savedSetupDao(),
@@ -117,7 +116,6 @@ class AuraLauncherApp : Application() {
         launchAppUseCase = LaunchAppUseCase(appRepository)
         manageHomeItemsUseCase = ManageHomeItemsUseCase(homeRepository, appRepository)
         authUseCase = AuthUseCase(authRepository)
-        deviceAuthUseCase = DeviceAuthUseCase(deviceAuthRepository)
         manageSavedSetupsUseCase = ManageSavedSetupsUseCase(savedSetupRepository, homeRepository)
     }
 
