@@ -1,3 +1,4 @@
+import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -24,7 +25,7 @@ android {
         // Supabase + backend config — real values come from local.properties
         // (gitignored, never committed) or CI secrets, never hardcoded here.
         // See local.properties.example for the keys to set.
-        val localProperties = java.util.Properties().apply {
+        val localProperties = Properties().apply {
             val localFile = rootProject.file("local.properties")
             if (localFile.exists()) {
                 localFile.inputStream().use { load(it) }

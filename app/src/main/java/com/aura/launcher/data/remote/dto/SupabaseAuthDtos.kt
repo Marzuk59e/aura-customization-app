@@ -3,7 +3,7 @@ package com.aura.launcher.data.remote.dto
 import com.google.gson.annotations.SerializedName
 
 /**
- * Request/response shapes for Supabase's GoTrue REST API (auth/v1/*), called
+ * Request/response shapes for Supabase's GoTrue REST API (auth/v1/...), called
  * directly over plain Retrofit — no Supabase Kotlin SDK, per the Phase 1
  * decision (see SupabaseAuthApi).
  */
